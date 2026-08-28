@@ -1,0 +1,10 @@
+{
+  "name": "roborally-web",
+  "version": "0.1.0",
+  "main": "module.js",
+  "private": true,
+  "files": [
+    "module.js",
+    "public"
+  ]
+}

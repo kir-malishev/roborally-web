@@ -948,6 +948,8 @@ class Game extends React.Component {
             || state.phase === "resolving" || state.phase === "finished";
         return <React.Fragment>
         <CommonRoom state={state} app={this}/>
+        <HostControls app={this} data={state} timerControls={[]}
+            emitEvent={(...args) => this.socket.emit(...args)}/>
         <main className="roborally-app">
             <header>
                 <div><h1>RoboRally</h1><p>Комната {state.roomId} · {state.phase === "programming" ? "программирование" : state.phase === "resolving" ? "исполнение" : state.phase === "power-down-choice" ? "решение Power Down" : state.phase === "reentry" ? "возрождение" : state.phase === "finished" ? "финиш" : "лобби"}</p></div>

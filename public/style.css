@@ -196,3 +196,5 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
 .member-host-controls { flex: none; display: inline-flex; gap: 2px; }
 .member-host-controls .host-button { font-size: 18px; color: #9eb1bd; cursor: pointer; }
 .member-host-controls .host-button:hover { color: #ffd26d; }
+.host-controls { z-index: 90; color: #edf3f7; background: rgba(21, 31, 39, .92); border-radius: 7px 0 0 0; }
+.host-controls .settings-button:hover { background: #344b5a; }

@@ -389,7 +389,8 @@ function init(wsServer, gamePath) {
 
     class GameState extends wsServer.users.RoomState {
         constructor(hostId, hostData, userRegistry) {
-            super(hostId, hostData, userRegistry, registry.games.roborally.id, gamePath);
+            // Game is still in beta, so it has no entry in the engine's games list and no play time is counted
+            super(hostId, hostData, userRegistry, null, gamePath);
             this.players = {};
             this.deck = [];
             this.discard = [];

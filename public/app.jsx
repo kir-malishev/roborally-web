@@ -407,6 +407,7 @@ function FieldGuide() {
             <dt>Power Down</dt><dd>Повреждённый робот тайно объявляет отключение на следующий раунд вместе с программой, но текущий ход выполняет полностью. В отключённом раунде он сбрасывает урон, не получает карты и не стреляет, но поле и другие роботы продолжают на него воздействовать. После раунда отключённые игроки одновременно решают, проснуться или продолжить; новый урон при пробуждении сохраняется, а при 5–9 повреждениях блокирует регистры открытыми случайными картами.</dd>
             <dt>Возрождение</dt><dd>Происходит до раздачи карт: на свободном архиве можно выбрать любое направление; при занятом архиве выбирается допустимая соседняя клетка и направление.</dd>
             <dt>Яма/край</dt><dd>Уничтожение, потеря жизни, возврат на архив с 2 повреждениями.</dd>
+            <dt>Победа</dt><dd>Активируйте все флаги по порядку. В этой версии также побеждает последний игрок, у которого остались жизни.</dd>
         </dl>
     </details>;
 }
@@ -415,6 +416,18 @@ function CourseSpecialRules({course}) {
     if (!course || !course.specialRules) return null;
     return <section className="panel active-special-rules"><h2>Special Rules · {course.name}</h2>
         <p>{course.specialRules.description}</p></section>;
+}
+
+function HostControls({state, app}) {
+    if (state.userId !== state.hostId || state.phase === "lobby" || state.phase === "finished") return null;
+    return <section className="panel host-controls">
+        <h2>Управление игрой</h2>
+        <button type="button" className={state.paused ? "resume" : "pause"}
+            aria-pressed={!!state.paused}
+            onClick={() => app.socket.emit("set-paused", {paused: !state.paused})}>
+            {state.paused ? "▶ Продолжить" : "Ⅱ Пауза"}
+        </button>
+    </section>;
 }
 
 class Lobby extends React.Component {
@@ -658,10 +671,10 @@ function ProgrammingTimer({state}) {
     if (!timer) return null;
     const remaining = Math.max(0, Number(timer.remaining) || 0);
     const pendingNames = (timer.userIds || [timer.userId]).map((userId) => state.playerNames[userId] || userId).join(", ");
-    return <section className={`programming-timer ${remaining <= 10 ? "warning" : ""}`} role="timer" aria-live="polite">
+    return <section className={`programming-timer ${timer.paused ? "paused" : remaining <= 10 ? "warning" : ""}`} role="timer" aria-live="polite">
         <span className="timer-clock" aria-hidden="true"><strong>{remaining}</strong><small>сек</small></span>
-        <div><strong>{timer.global ? "Особый таймер курса" : "Последний игрок программирует"}</strong>
-            <small>{pendingNames}: после сигнала пустые регистры заполнятся случайно.</small></div>
+        <div><strong>{timer.paused ? "Таймер приостановлен" : timer.global ? "Особый таймер курса" : "Последний игрок программирует"}</strong>
+            <small>{timer.paused ? "Отсчёт продолжится после снятия паузы." : `${pendingNames}: после сигнала пустые регистры заполнятся случайно.`}</small></div>
     </section>;
 }
 
@@ -676,6 +689,7 @@ function Program({state, privateState, app}) {
     const registerCards = privateState.registerCards || [];
     const lockedRegisters = privateState.lockedRegisters || [];
     const autoFilledRegisters = privateState.autoFilledRegisters || [];
+    const interactionLocked = privateState.locked || state.paused;
     const drag = (event, payload) => {
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("application/json", JSON.stringify(payload));
@@ -704,12 +718,12 @@ function Program({state, privateState, app}) {
         <div className="program-heading">
             <div><h2>Программирование · раунд {state.round}</h2><p>Выберите ровно 5 карт. Их порядок — порядок регистров.</p></div>
             <div className="program-actions">
-                <button onClick={() => app.socket.emit("auto-program")} disabled={privateState.locked}>Авто</button>
+                <button onClick={() => app.socket.emit("auto-program")} disabled={interactionLocked}>Авто</button>
                 <div className="power-down-action">
                     <PowerDownToken selected={!!privateState.powerDownIntent}
                         confirmed={!!privateState.locked && !!privateState.powerDownIntent}
                         urgent={privateState.damage >= 4} unavailable={!privateState.canPowerDown}
-                        disabled={privateState.locked || !privateState.canPowerDown}
+                        disabled={interactionLocked || !privateState.canPowerDown}
                         title={!privateState.canPowerDown ? privateState.powerDownUnavailableReason || "Power Down недоступен"
                             : privateState.powerDownIntent ? "Отменить Power Down следующего раунда" : "Power Down в следующем раунде"}
                         onClick={() => app.socket.emit("set-power-down-intent", {enabled: !privateState.powerDownIntent})}/>
@@ -718,17 +732,17 @@ function Program({state, privateState, app}) {
                         : privateState.powerDownIntent ? "Выбрано" : "Следующий раунд"}</small>
                 </div>
                 <button className="primary" onClick={() => app.socket.emit("lock-program")}
-                    disabled={selectedCount !== 5 || privateState.locked}>{privateState.locked ? "Готов ✓" : "Готов"}</button>
+                    disabled={selectedCount !== 5 || interactionLocked}>{privateState.locked ? "Готов ✓" : "Готов"}</button>
             </div>
         </div>
-        <div className="registers" onDragOver={(event) => !privateState.locked && event.preventDefault()}
+        <div className="registers" onDragOver={(event) => !interactionLocked && event.preventDefault()}
             onDrop={dropOnRegisters}>
             {[0, 1, 2, 3, 4].map((index) => {
                 const card = registerCards[index] || privateState.hand.find((item) => item.id === selected[index]);
                 return <div className={`register ${lockedRegisters.includes(index) ? "locked" : ""} ${autoFilledRegisters.includes(index) ? "auto-filled" : ""}`} key={index}
-                    draggable={!!card && !lockedRegisters.includes(index) && !privateState.locked}
+                    draggable={!!card && !lockedRegisters.includes(index) && !interactionLocked}
                     onDragStart={(event) => drag(event, {kind: "register", register: index})}
-                    onDragOver={(event) => !lockedRegisters.includes(index) && event.preventDefault()}
+                    onDragOver={(event) => !interactionLocked && !lockedRegisters.includes(index) && event.preventDefault()}
                     onDrop={(event) => drop(event, index)}
                     onDoubleClick={() => app.socket.emit("clear-register", index)}>
                     <b>{index + 1}</b><span>{card ? card.label : "—"}</span>
@@ -741,8 +755,8 @@ function Program({state, privateState, app}) {
             {privateState.hand.map((card) => {
                 const selectedIndex = selected.indexOf(card.id);
                 return <button className={`card ${selectedIndex >= 0 ? "selected" : ""} ${autoFilledRegisters.includes(selectedIndex) ? "auto-filled-source" : ""}`} key={card.id}
-                    disabled={privateState.locked}
-                    draggable={!privateState.locked}
+                    disabled={interactionLocked}
+                    draggable={!interactionLocked}
                     onDragStart={(event) => drag(event, {kind: "card", cardId: card.id})}
                     onClick={() => app.socket.emit("toggle-card", card.id)}>
                     {selectedIndex >= 0 ? <small className="selected-register-label">{`Регистр ${selectedIndex + 1}`}</small> : null}
@@ -792,9 +806,9 @@ function PowerDownChoicePanel({state, privateState, app}) {
         <div><h2>Продолжить Power Down?</h2><p>Ответили: {progress.answered} из {progress.total}. Решения откроются одновременно.</p></div>
         {choice.eligible ? <div className="power-down-choice-actions">
             <button type="button" className={choice.answered && choice.choice === false ? "selected" : ""}
-                disabled={choice.answered} onClick={() => app.socket.emit("choose-power-down-continuation", {enabled: false})}>Проснуться</button>
+                disabled={choice.answered || state.paused} onClick={() => app.socket.emit("choose-power-down-continuation", {enabled: false})}>Проснуться</button>
             <PowerDownToken selected={choice.answered && choice.choice === true}
-                confirmed={choice.answered && choice.choice === true} disabled={choice.answered}
+                confirmed={choice.answered && choice.choice === true} disabled={choice.answered || state.paused}
                 title="Остаться в Power Down ещё на один раунд"
                 onClick={() => app.socket.emit("choose-power-down-continuation", {enabled: true})}/>
             {choice.answered ? <small>Ваш выбор принят</small> : null}
@@ -827,13 +841,15 @@ class ReentryPanel extends React.Component {
             <p>Сначала укажите режим, если он доступен, затем клетку и направление робота.</p>
             {reentry.needsPowerDownChoice ? <div className="reentry-power-down-choice">
                 <button type="button" className={this.state.poweredDown === false ? "selected" : ""}
+                    disabled={state.paused}
                     onClick={() => this.setState({poweredDown: false})}>Обычный режим</button>
                 <PowerDownToken selected={this.state.poweredDown === true} title="Возродиться в Power Down"
+                    disabled={state.paused}
                     onClick={() => this.setState({poweredDown: true})}/>
             </div> : null}
             <div className="reentry-options">{reentry.candidates.map((candidate, index) => <div className="reentry-option" key={`${candidate.x},${candidate.y}`}>
                 <strong>{candidate.archive ? "Архив" : `Клетка ${index + 1}`}</strong>
-                <span>{candidate.directions.map((direction) => <button className="direction-choice" key={direction} disabled={!modeChosen}
+                <span>{candidate.directions.map((direction) => <button className="direction-choice" key={direction} disabled={!modeChosen || state.paused}
                     title={`Направление: ${direction}`} onClick={() => app.socket.emit("choose-reentry", {x: candidate.x, y: candidate.y,
                         direction, ...(reentry.needsPowerDownChoice ? {poweredDown: this.state.poweredDown} : {})})}>
                     {arrows[direction]}
@@ -931,7 +947,8 @@ class Game extends React.Component {
                 <div><h1>RoboRally</h1><p>Комната {state.roomId} · {state.phase === "programming" ? "программирование" : state.phase === "resolving" ? "исполнение" : state.phase === "power-down-choice" ? "решение Power Down" : state.phase === "reentry" ? "возрождение" : state.phase === "finished" ? "финиш" : "лобби"}</p></div>
                 {state.userId === state.hostId && state.phase !== "lobby" ? <button onClick={() => this.socket.emit("restart-game")}>В лобби</button> : null}
             </header>
-            {state.phase === "lobby" ? <Lobby state={state} app={this}/> : <div className="game-screen">
+            {state.phase === "lobby" ? <Lobby state={state} app={this}/> : <div className={`game-screen ${state.paused ? "is-paused" : ""}`}>
+                {state.paused ? <section className="pause-banner" role="status"><strong>Игра на паузе</strong><span>Хост может продолжить игру из панели управления.</span></section> : null}
                 <ProgrammingTimer state={state}/>
                 <section className="game-layout">
                     <div className="board-column">
@@ -975,6 +992,7 @@ class Game extends React.Component {
                         <CourseSpecialRules course={state.course}/>
                         <FieldGuide/>
                         <section className="panel log"><h2>Системный журнал</h2>{state.log.map((item, index) => <p key={index}>{item}</p>)}</section>
+                        <HostControls state={state} app={this}/>
                         <div className="board-toolbar panel" aria-label="Масштаб игрового поля">
                             <button type="button" title="Уменьшить поле" aria-label="Уменьшить поле"
                                 disabled={state.boardScale <= 30} onClick={() => this.setBoardScale(state.boardScale - 10)}>−</button>
@@ -1010,7 +1028,9 @@ class Game extends React.Component {
                         <PowerDownChoicePanel state={state} privateState={this.privateState} app={this}/>
                         <ReentryPanel state={state} privateState={this.privateState} app={this}/>
                         <PublicPrograms state={state}/>
-                        {state.phase === "finished" ? <section className="winner panel"><h2>Победитель: {state.playerNames[state.winnerId]}</h2><p>Все контрольные флаги активированы.</p></section> : null}
+                        {state.phase === "finished" ? <section className="winner panel"><h2>Победитель: {state.playerNames[state.winnerId]}</h2>
+                            <p>{state.winnerReason === "last-robot-standing" ? "Все остальные роботы потеряли последние жизни." : "Все контрольные флаги активированы."}</p>
+                        </section> : null}
                     </div>
                 </section> : null}
             </div>}

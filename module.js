@@ -390,12 +390,14 @@ function init(wsServer, gamePath) {
             this.programmingTimerHandle = null;
             this.programmingTimerGeneration = 0;
             this.autoFillResolveHandle = null;
+            this.pauseWaiters = [];
             this.room = {
                 ...this.room,
                 inited: true,
                 title: "RoboRally",
                 hostId,
                 phase: "lobby",
+                paused: false,
                 round: 0,
                 register: null,
                 playerNames: {},
@@ -408,6 +410,7 @@ function init(wsServer, gamePath) {
                 flags: [],
                 log: ["Комната создана. Выберите роль игрока или зрителя."],
                 winnerId: null,
+                winnerReason: null,
                 resolution: null,
                 laserShots: [],
                 boardEvents: [],
@@ -725,6 +728,8 @@ function init(wsServer, gamePath) {
         startGame() {
             this.cancelProgrammingTimer();
             this.cancelAutoFillResolution();
+            this.room.paused = false;
+            this.releasePauseWaiters();
             const users = this.room.playerSlots.filter(Boolean);
             if (users.length < 2)
                 return;
@@ -733,6 +738,7 @@ function init(wsServer, gamePath) {
             this.room.phase = "programming";
             this.room.round = 0;
             this.room.winnerId = null;
+            this.room.winnerReason = null;
             this.room.board = {name: this.room.course.board, size: BOARD_SIZE, start: this.room.course.start};
             this.room.flags = this.room.course.flags.map(([x, y], index) => ({x, y, homeX: x, homeY: y, number: index + 1}));
             const startLayout = START_LAYOUTS[this.room.course.start] || START_LAYOUTS[START_CARDS[1]];
@@ -767,6 +773,8 @@ function init(wsServer, gamePath) {
             this.powerDownChoices = new Map();
             this.room.powerDownChoice = null;
             this.destructionCounter = 0;
+            this.survivalVictoryBatchDepth = 0;
+            this.survivalVictoryCheckPending = false;
             // Every firing phase must produce fresh React keys.  Without an
             // initialized counter `++undefined` became NaN, so subsequent
             // laser animations were re-used by the browser and stayed ended.
@@ -777,6 +785,47 @@ function init(wsServer, gamePath) {
             this.room.programmingAutoFill = null;
             this.addLog("Игра началась. Роботы получили программы.");
             this.startRound();
+        }
+
+        checkLastRobotStanding() {
+            if (this.room.phase === "lobby" || this.room.phase === "finished" || this.room.robots.length < 2)
+                return false;
+            const remaining = this.room.robots.filter((robot) => {
+                const player = this.players[robot.userId];
+                return player && player.lives > 0 && !robot.eliminated;
+            });
+            if (remaining.length !== 1)
+                return false;
+            const winner = remaining[0];
+            const everyOpponentEliminated = this.room.robots.every((robot) => robot.userId === winner.userId
+                || robot.eliminated || !this.players[robot.userId] || this.players[robot.userId].lives <= 0);
+            if (!everyOpponentEliminated)
+                return false;
+            this.room.phase = "finished";
+            this.room.winnerId = winner.userId;
+            this.room.winnerReason = "last-robot-standing";
+            return true;
+        }
+
+        beginSurvivalVictoryBatch() {
+            this.survivalVictoryBatchDepth = (this.survivalVictoryBatchDepth || 0) + 1;
+        }
+
+        endSurvivalVictoryBatch() {
+            this.survivalVictoryBatchDepth = Math.max(0, (this.survivalVictoryBatchDepth || 0) - 1);
+            if (!this.survivalVictoryBatchDepth && this.survivalVictoryCheckPending) {
+                this.survivalVictoryCheckPending = false;
+                return this.checkLastRobotStanding();
+            }
+            return false;
+        }
+
+        requestSurvivalVictoryCheck() {
+            if (this.survivalVictoryBatchDepth) {
+                this.survivalVictoryCheckPending = true;
+                return false;
+            }
+            return this.checkLastRobotStanding();
         }
 
         reboot(robot, reason) {
@@ -798,6 +847,7 @@ function init(wsServer, gamePath) {
                 robot.x = null;
                 robot.y = null;
                 this.addLog(`${this.room.playerNames[robot.userId]} потерял последнюю жизнь.`);
+                this.requestSurvivalVictoryCheck();
                 return;
             }
             robot.destroyed = true;
@@ -941,6 +991,12 @@ function init(wsServer, gamePath) {
                 if (!robot.eliminated)
                     this.room.reentryQueue.push(userId);
             }
+            if (this.room.phase === "finished") {
+                this.room.reentryQueue = [];
+                this.room.reentryUserId = null;
+                this.addLog(`${this.room.playerNames[this.room.winnerId]} остался единственным роботом с жизнями и победил!`);
+                return this.update();
+            }
             this.room.reentryUserId = this.room.reentryQueue[0] || null;
             if (this.room.reentryUserId) {
                 this.addLog(`${this.room.playerNames[this.room.reentryUserId]} выбирает возрождение.`);
@@ -992,9 +1048,11 @@ function init(wsServer, gamePath) {
         }
 
         async showStage(stage, delay = STEP_DELAY_MS) {
+            await this.waitWhilePaused();
             this.room.stage = stage;
             this.update();
             await wait(delay);
+            await this.waitWhilePaused();
             this.clearBoardEvents();
         }
 
@@ -1103,23 +1161,28 @@ function init(wsServer, gamePath) {
                     changed = true;
                 }
             }
-            allowed.forEach((item) => {
-                const {robot, target, direction} = item;
-                if (!this.isInside(target.x, target.y)) {
-                    this.addBoardEvent("conveyor", robot, {direction, express: !!expressOnly});
-                    return this.reboot(robot, "конвейер вынес за край");
-                }
-                robot.x = target.x;
-                robot.y = target.y;
-            });
-            allowed.forEach(({robot, direction}) => {
-                if (robot.destroyed) return;
-                const destinationDirection = this.conveyorAt(robot);
-                const turn=conveyorArrivalTurn(direction,destinationDirection);
-                if (turn) this.turnRobot(robot, turn);
-                this.addBoardEvent("conveyor", robot, {direction, turn: turn || 0, express: !!expressOnly});
-                if (this.features.pits.has(this.boardKey(robot))) this.reboot(robot, "конвейер переместил в яму");
-            });
+            this.beginSurvivalVictoryBatch();
+            try {
+                allowed.forEach((item) => {
+                    const {robot, target, direction} = item;
+                    if (!this.isInside(target.x, target.y)) {
+                        this.addBoardEvent("conveyor", robot, {direction, express: !!expressOnly});
+                        return this.reboot(robot, "конвейер вынес за край");
+                    }
+                    robot.x = target.x;
+                    robot.y = target.y;
+                });
+                allowed.forEach(({robot, direction}) => {
+                    if (robot.destroyed) return;
+                    const destinationDirection = this.conveyorAt(robot);
+                    const turn=conveyorArrivalTurn(direction,destinationDirection);
+                    if (turn) this.turnRobot(robot, turn);
+                    this.addBoardEvent("conveyor", robot, {direction, turn: turn || 0, express: !!expressOnly});
+                    if (this.features.pits.has(this.boardKey(robot))) this.reboot(robot, "конвейер переместил в яму");
+                });
+            } finally {
+                this.endSurvivalVictoryBatch();
+            }
             this.moveFlagsOnConveyors(expressOnly);
         }
 
@@ -1161,11 +1224,16 @@ function init(wsServer, gamePath) {
 
         activatePushers() {
             this.clearBoardEvents();
-            this.features.pushers.filter((pusher) => !pusher.active || pusher.active.includes(this.room.register))
-                .forEach((pusher) => {
-                    const robot = this.robotAt(pusher.x, pusher.y);
-                    if (robot) this.move(robot, pusher.direction, "толкатель");
-                });
+            this.beginSurvivalVictoryBatch();
+            try {
+                this.features.pushers.filter((pusher) => !pusher.active || pusher.active.includes(this.room.register))
+                    .forEach((pusher) => {
+                        const robot = this.robotAt(pusher.x, pusher.y);
+                        if (robot) this.move(robot, pusher.direction, "толкатель");
+                    });
+            } finally {
+                this.endSurvivalVictoryBatch();
+            }
         }
 
         activateGears() {
@@ -1213,8 +1281,13 @@ function init(wsServer, gamePath) {
         }
 
         applyLaserHits(hits) {
-            (hits || []).forEach(({userId, amount}) =>
-                this.damageRobot(this.getRobot(userId), amount, "лазеры"));
+            this.beginSurvivalVictoryBatch();
+            try {
+                (hits || []).forEach(({userId, amount}) =>
+                    this.damageRobot(this.getRobot(userId), amount, "лазеры"));
+            } finally {
+                this.endSurvivalVictoryBatch();
+            }
         }
 
         touchCheckpoints() {
@@ -1235,6 +1308,7 @@ function init(wsServer, gamePath) {
                         if (player.checkpoints === this.room.flags.length) {
                             this.room.phase = "finished";
                             this.room.winnerId = robot.userId;
+                            this.room.winnerReason = "flags";
                         }
                     } else if (previousArchive !== `${robot.x},${robot.y}`) {
                         this.addBoardEvent("archive", robot, {onFlag: true});
@@ -1311,13 +1385,18 @@ function init(wsServer, gamePath) {
                 for (const {robot, card} of actions) {
                     await this.executeCard(robot, card);
                     this.room.resolution.push({register: register + 1, userId: robot.userId, card: card.label});
+                    if (this.room.phase === "finished") break;
                 }
+                if (this.room.phase === "finished") break;
                 this.moveConveyors(true);
                 await this.showStage(`Регистр ${register + 1}: экспресс-конвейеры`);
+                if (this.room.phase === "finished") break;
                 this.moveConveyors(false);
                 await this.showStage(`Регистр ${register + 1}: все конвейеры`);
+                if (this.room.phase === "finished") break;
                 this.activatePushers();
                 await this.showStage(`Регистр ${register + 1}: толкатели`);
+                if (this.room.phase === "finished") break;
                 this.activateGears();
                 await this.showStage(`Регистр ${register + 1}: шестерни`);
                 const laserHits = this.fireAllLasers();
@@ -1325,6 +1404,7 @@ function init(wsServer, gamePath) {
                 this.room.laserShots = [];
                 this.applyLaserHits(laserHits);
                 await this.showStage(`Регистр ${register + 1}: попадания лазеров`, STEP_DELAY_MS);
+                if (this.room.phase === "finished") break;
                 this.touchCheckpoints();
                 await this.showStage(`Регистр ${register + 1}: флаги и архивы`);
             }
@@ -1357,7 +1437,9 @@ function init(wsServer, gamePath) {
                 player.locked = false;
             });
             if (this.room.phase === "finished") {
-                this.addLog(`${this.room.playerNames[this.room.winnerId]} собрал все флаги и победил!`);
+                this.addLog(this.room.winnerReason === "last-robot-standing"
+                    ? `${this.room.playerNames[this.room.winnerId]} остался единственным роботом с жизнями и победил!`
+                    : `${this.room.playerNames[this.room.winnerId]} собрал все флаги и победил!`);
                 this.update();
             } else {
                 this.addLog("Регистр 5 завершён. Начинается следующий раунд.");
@@ -1369,6 +1451,45 @@ function init(wsServer, gamePath) {
             return this.room.playerSlots.filter(Boolean).every((userId) => this.players[userId] && this.players[userId].locked);
         }
 
+        waitWhilePaused() {
+            if (!this.room.paused)
+                return Promise.resolve();
+            return new Promise((resolve) => this.pauseWaiters.push(resolve));
+        }
+
+        releasePauseWaiters() {
+            const waiters = this.pauseWaiters.splice(0);
+            waiters.forEach((resolve) => resolve());
+        }
+
+        setPaused(paused) {
+            const next = !!paused;
+            if (this.room.paused === next)
+                return false;
+            this.room.paused = next;
+            const timer = this.room.programmingTimer;
+            if (next) {
+                if (timer && !timer.paused) {
+                    timer.pausedRemainingMs = Math.max(0, timer.endsAt - Date.now());
+                    timer.remaining = Math.max(0, Math.ceil(timer.pausedRemainingMs / 1000));
+                    timer.paused = true;
+                }
+                if (this.programmingTimerHandle) {
+                    clearInterval(this.programmingTimerHandle);
+                    this.programmingTimerHandle = null;
+                }
+            } else {
+                if (timer && timer.paused) {
+                    timer.endsAt = Date.now() + Math.max(0, timer.pausedRemainingMs || 0);
+                    timer.paused = false;
+                    delete timer.pausedRemainingMs;
+                    this.scheduleProgrammingTimer(this.programmingTimerGeneration);
+                }
+                this.releasePauseWaiters();
+            }
+            return true;
+        }
+
         cancelProgrammingTimer() {
             if (this.programmingTimerHandle) {
                 clearInterval(this.programmingTimerHandle);
@@ -1377,6 +1498,35 @@ function init(wsServer, gamePath) {
             this.programmingTimerGeneration = (this.programmingTimerGeneration || 0) + 1;
             if (this.room)
                 this.room.programmingTimer = null;
+        }
+
+        scheduleProgrammingTimer(generation) {
+            if (this.programmingTimerHandle)
+                clearInterval(this.programmingTimerHandle);
+            this.programmingTimerHandle = setInterval(() => {
+                const timer = this.room.programmingTimer;
+                const players = this.room.playerSlots.filter((userId) => userId && this.players[userId]);
+                const stillPending = players.filter((userId) => !this.players[userId].locked);
+                if (generation !== this.programmingTimerGeneration || this.room.phase !== "programming"
+                    || !timer || timer.paused || !stillPending.length || (!timer.global && this.players[timer.userId].locked)) {
+                    if (generation === this.programmingTimerGeneration && (!timer || !timer.paused))
+                        this.cancelProgrammingTimer();
+                    return;
+                }
+                if (timer.global) {
+                    timer.userIds = [...stillPending];
+                    timer.userId = stillPending[0];
+                }
+                const remaining = Math.max(0, Math.ceil((timer.endsAt - Date.now()) / 1000));
+                if (remaining <= 0)
+                    return this.expireProgrammingTimer(timer.userId, generation);
+                if (remaining !== timer.remaining) {
+                    timer.remaining = remaining;
+                    this.update();
+                }
+            }, 200);
+            if (this.programmingTimerHandle.unref)
+                this.programmingTimerHandle.unref();
         }
 
         cancelAutoFillResolution() {
@@ -1410,29 +1560,7 @@ function init(wsServer, gamePath) {
             this.addLog(global
                 ? `Особое правило «${this.room.course.name}»: запущен общий таймер программирования на ${seconds} секунд.`
                 : `${this.room.playerNames[userIds[0]]} остаётся последним: запущен таймер программирования на 30 секунд.`);
-            this.programmingTimerHandle = setInterval(() => {
-                const timer = this.room.programmingTimer;
-                const stillPending = players.filter((userId) => !this.players[userId].locked);
-                if (generation !== this.programmingTimerGeneration || this.room.phase !== "programming"
-                    || !timer || !stillPending.length || (!timer.global && this.players[timer.userId].locked)) {
-                    if (generation === this.programmingTimerGeneration)
-                        this.cancelProgrammingTimer();
-                    return;
-                }
-                if (timer.global) {
-                    timer.userIds = [...stillPending];
-                    timer.userId = stillPending[0];
-                }
-                const remaining = Math.max(0, Math.ceil((timer.endsAt - Date.now()) / 1000));
-                if (remaining <= 0)
-                    return this.expireProgrammingTimer(timer.userId, generation);
-                if (remaining !== timer.remaining) {
-                    timer.remaining = remaining;
-                    this.update();
-                }
-            }, 200);
-            if (this.programmingTimerHandle.unref)
-                this.programmingTimerHandle.unref();
+            this.scheduleProgrammingTimer(generation);
             return true;
         }
 
@@ -1579,18 +1707,29 @@ function init(wsServer, gamePath) {
             if (event === "restart-game" && userId === this.room.hostId) {
                 this.cancelProgrammingTimer();
                 this.cancelAutoFillResolution();
+                this.room.paused = false;
+                this.releasePauseWaiters();
                 this.resolutionId = (this.resolutionId || 0) + 1;
                 this.powerDownChoiceUsers = [];
                 this.powerDownChoices = new Map();
                 this.room.phase = "lobby";
                 this.room.robots = [];
                 this.room.winnerId = null;
+                this.room.winnerReason = null;
                 this.room.powerDownChoice = null;
                 this.room.boardEvents = [];
                 this.room.programmingAutoFill = null;
                 this.addLog("Хост вернул игру в лобби.");
                 return this.update();
             }
+            if (event === "set-paused" && userId === this.room.hostId && this.room.phase !== "lobby"
+                && this.room.phase !== "finished" && value && typeof value.paused === "boolean") {
+                if (this.setPaused(value.paused))
+                    this.addLog(value.paused ? "Хост поставил игру на паузу." : "Хост продолжил игру.");
+                return this.update();
+            }
+            if (this.room.paused && this.room.phase !== "lobby")
+                return;
             if (event === "choose-reentry" && this.room.phase === "reentry") {
                 this.chooseReentry(userId, value);
                 return;

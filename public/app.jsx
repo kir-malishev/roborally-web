@@ -417,6 +417,17 @@ function CourseSpecialRules({course}) {
         <p>{course.specialRules.description}</p></section>;
 }
 
+function MemberHostControls({state, userId}) {
+    const isHost = state.userId === state.hostId;
+    if (!isHost || userId === state.userId) return null;
+    return <span className="member-host-controls">
+        {state.onlinePlayers.includes(userId) ? <i className="material-icons host-button" title="Передать хоста"
+            onClick={(evt) => window.commonRoom.handleGiveHost(userId, evt)}>vpn_key</i> : null}
+        <i className="material-icons host-button" title="Удалить"
+            onClick={(evt) => window.commonRoom.handleRemovePlayer(userId, evt)}>delete_forever</i>
+    </span>;
+}
+
 class Lobby extends React.Component {
     constructor(props) {
         super(props);
@@ -468,14 +479,16 @@ class Lobby extends React.Component {
                 <div className="member-column"><h3>Игроки <small>{playerCount}/8</small></h3>
                     {players.length ? players.map((userId) => <div className="lobby-member" key={userId}>
                         <i style={{background: colorFor(userId)}}></i>
-                        <span>{state.playerNames[userId]} {userId === state.hostId ? <small>хост</small> : null}</span>
+                        <span><PlayerName data={state} id={userId}/> {userId === state.hostId ? <small>хост</small> : null}</span>
+                        <MemberHostControls state={state} userId={userId}/>
                         <em>старт {((state.startAssignments || {})[userId] ?? 0) + 1}</em>
                         {userId === state.userId ? <b>вы</b> : null}
                     </div>) : <p className="empty-members">Пока никто не присоединился.</p>}
                 </div>
                 <div className="member-column"><h3>Зрители <small>{spectators.length}</small></h3>
                     {spectators.length ? spectators.map((userId) => <div className="lobby-member spectator" key={userId}>
-                        <span>{state.playerNames[userId]} {userId === state.hostId ? <small>хост</small> : null}</span>
+                        <span><PlayerName data={state} id={userId}/> {userId === state.hostId ? <small>хост</small> : null}</span>
+                        <MemberHostControls state={state} userId={userId}/>
                         {userId === state.userId ? <b>вы</b> : null}
                     </div>) : <p className="empty-members">Нет зрителей.</p>}
                 </div>
@@ -911,12 +924,19 @@ class Game extends React.Component {
 
     componentDidMount() {
         const initArgs = CommonRoom.roomInit(this);
-        this.socket.on("state", (state) => this.setState({...state, userId: this.userId, inited: true}));
+        this.socket.on("state", (state) => {
+            CommonRoom.processCommonRoom(state, this.state, {
+                maxPlayers: 8,
+                largeImageKey: "roborally",
+                details: "RoboRally"
+            }, this);
+            this.setState({...state, userId: this.userId, inited: true});
+        });
         this.socket.on("player-state", (playerState) => {
             this.privateState = playerState;
             this.forceUpdate();
         });
-        this.socket.on("message", (message) => alert(message));
+        this.socket.on("message", (message) => popup.alert({content: message}));
         this.socket.emit("init", initArgs);
     }
 
@@ -926,7 +946,9 @@ class Game extends React.Component {
         const isPlayer = state.playerSlots.includes(state.userId);
         const showBottomDock = (state.phase === "programming" && isPlayer) || state.phase === "power-down-choice" || state.phase === "reentry"
             || state.phase === "resolving" || state.phase === "finished";
-        return <main className="roborally-app">
+        return <React.Fragment>
+        <CommonRoom state={state} app={this}/>
+        <main className="roborally-app">
             <header>
                 <div><h1>RoboRally</h1><p>Комната {state.roomId} · {state.phase === "programming" ? "программирование" : state.phase === "resolving" ? "исполнение" : state.phase === "power-down-choice" ? "решение Power Down" : state.phase === "reentry" ? "возрождение" : state.phase === "finished" ? "финиш" : "лобби"}</p></div>
                 {state.userId === state.hostId && state.phase !== "lobby" ? <button onClick={() => this.socket.emit("restart-game")}>В лобби</button> : null}
@@ -1014,7 +1036,8 @@ class Game extends React.Component {
                     </div>
                 </section> : null}
             </div>}
-        </main>;
+        </main>
+        </React.Fragment>;
     }
 }
 

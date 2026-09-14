@@ -1,2 +1,7 @@
 node_modules/
 package-lock.json
+board-audit/*.png
+board-audit/*.jpg
+board-audit/*.jpeg
+board-audit/*.webp
+board-audit/*.gif

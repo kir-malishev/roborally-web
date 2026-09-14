@@ -3,6 +3,23 @@
   "version": "0.1.0",
   "main": "module.js",
   "private": true,
+  "scripts": {
+    "test": "node test/board-integrity.js && node test/board-audit-rotation.js && node test/laser-regression.js && node test/board-events.js && node test/programming-timer.js && node test/special-rules.js && node test/power-down.js && node test/web-assets.js",
+    "test:hints": "node test/browser-hints.js",
+    "test:lobby": "node test/browser-lobby.js",
+    "test:lasers": "node test/laser-regression.js",
+    "test:lasers:browser": "node test/browser-lasers.js",
+    "test:power-down": "node test/power-down.js",
+    "test:power-down:browser": "node test/browser-power-down.js",
+    "test:events": "node test/board-events.js",
+    "test:events:browser": "node test/browser-board-events.js",
+    "test:timer": "node test/programming-timer.js",
+    "test:timer:browser": "node test/browser-programming-timer.js",
+    "test:special-rules": "node test/special-rules.js",
+    "test:browser": "node test/browser-hints.js && node test/browser-lasers.js && node test/browser-lobby.js && node test/browser-power-down.js && node test/browser-board-events.js && node test/browser-programming-timer.js",
+    "test:assets": "node test/web-assets.js",
+    "audit:boards": "node scripts/render-board-audit.js"
+  },
   "files": [
     "module.js",
     "public"

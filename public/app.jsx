@@ -382,34 +382,178 @@ function PlayerPanel({state}) {
                 <i style={{background: robot.color}}></i>
                 <span className={`${userId === state.userId ? "own-player-name" : "player-name"} player-name-status ${status}`}
                     title={statusTitle || undefined}>{state.playerNames[userId]}</span>
-                <span>⚑ {stats.checkpoints || 0}/{state.flags.length}</span>
-                <span>⚡ {stats.damage || 0}</span>
-                <span>♥ {stats.lives == null ? 0 : stats.lives}</span>
+                <span className="player-stat flags" title="Активированные флаги" aria-label={`Активированные флаги: ${stats.checkpoints || 0} из ${state.flags.length}`}>
+                    <i aria-hidden="true">⚑</i><b>{stats.checkpoints || 0}/{state.flags.length}</b></span>
+                <span className="player-stat damage" title="Повреждения" aria-label={`Повреждения: ${stats.damage || 0}`}>
+                    <i aria-hidden="true">⚡</i><b>{stats.damage || 0}</b></span>
+                <span className="player-stat lives" title="Оставшиеся жизни" aria-label={`Оставшиеся жизни: ${stats.lives == null ? 0 : stats.lives}`}>
+                    <i aria-hidden="true">♥</i><b>{stats.lives == null ? 0 : stats.lives}</b></span>
                 {stats.poweredDown ? <small>POWER DOWN</small> : stats.powerDownNextRound ? <small>POWER DOWN · следующий раунд</small> : null}
             </div>;
         })}
     </section>;
 }
 
-function FieldGuide() {
-    return <details className="panel field-guide">
-        <summary>Памятка по полю</summary>
-        <ol><li>Открыть карты регистра</li><li>Роботы: больший приоритет раньше</li><li>Экспресс-конвейеры</li><li>Все конвейеры</li><li>Толкатели</li><li>Шестерни</li><li>Лазеры поля и роботов</li><li>Флаги и архивы</li></ol>
-        <dl>
-            <dt>Конвейер</dt><dd>Двигает одновременно, роботов не толкает. Синий экспресс движется дважды.</dd>
-            <dt>Поворотный конвейер</dt><dd>Поворачивает робота, только когда лента переместила его на изгиб.</dd>
-            <dt>Толкатель</dt><dd>После конвейеров толкает робота на одну клетку от стены только в номера регистров, напечатанные на самом толкателе.</dd>
-            <dt>Шестерня</dt><dd>Поворачивает на 90°.</dd>
-            <dt>Лазер</dt><dd>Наносит урон после движения поля; стены и первый робот останавливают луч.</dd>
-            <dt>Ключ</dt><dd>Архив; после регистра 5 снимает 1 повреждение.</dd>
-            <dt>Флаг + ключ</dt><dd>Нужно коснуться по порядку; это архив и обычный ключ, снимающий 1 повреждение после регистра 5.</dd>
-            <dt>Таймер программирования</dt><dd>Когда готовые программы сдали все игроки, кроме одного, у последнего остаётся 30 секунд. По истечении времени пустые регистры случайно заполняются оставшимися картами с руки и блокируются.</dd>
-            <dt>Power Down</dt><dd>Повреждённый робот тайно объявляет отключение на следующий раунд вместе с программой, но текущий ход выполняет полностью. В отключённом раунде он сбрасывает урон, не получает карты и не стреляет, но поле и другие роботы продолжают на него воздействовать. После раунда отключённые игроки одновременно решают, проснуться или продолжить; новый урон при пробуждении сохраняется, а при 5–9 повреждениях блокирует регистры открытыми случайными картами.</dd>
-            <dt>Возрождение</dt><dd>Происходит до раздачи карт: на свободном архиве можно выбрать любое направление; при занятом архиве выбирается допустимая соседняя клетка и направление.</dd>
-            <dt>Яма/край</dt><dd>Уничтожение, потеря жизни, возврат на архив с 2 повреждениями.</dd>
-            <dt>Победа</dt><dd>Активируйте все флаги по порядку. В этой версии также побеждает последний игрок, у которого остались жизни.</dd>
-        </dl>
-    </details>;
+const GUIDE_PHASES = [
+    ["Карты", "Все открывают текущий регистр"],
+    ["Роботы", "Команды по убыванию приоритета"],
+    ["Экспресс", "Экспресс-конвейеры движут на 1 клетку"],
+    ["Конвейеры", "Все конвейеры движут на 1 клетку"],
+    ["Толкатели", "Срабатывают номера текущего регистра"],
+    ["Шестерни", "Поворачивают роботов на 90°"],
+    ["Лазеры", "Стреляют поле и активные роботы"],
+    ["Флаги", "Флаги и архивные точки активируются"]
+];
+
+const GUIDE_ELEMENTS = [
+    {id: "conveyor-straight", title: "Конвейер", phase: "4", text: "Одновременно перемещает роботов на 1 клетку и не толкает их."},
+    {id: "express-straight", title: "Экспресс-конвейер", phase: "3 и 4", text: "Перемещает робота дважды: по 1 клетке в каждой фазе."},
+    {id: "conveyor-turn", title: "Поворот конвейера", phase: "3 или 4", text: "Поворачивает робота, если лента привезла его на изгиб."},
+    {id: "pusher-even", title: "Чётный толкатель", phase: "5", text: "Толкает на 1 клетку только в напечатанные чётные регистры."},
+    {id: "pusher-odd", title: "Нечётный толкатель", phase: "5", text: "Толкает на 1 клетку только в напечатанные нечётные регистры."},
+    {id: "gear-clockwise", title: "Правая шестерня", phase: "6", text: "Поворачивает робота на 90° по часовой стрелке."},
+    {id: "gear-counterclockwise", title: "Левая шестерня", phase: "6", text: "Поворачивает робота на 90° против часовой стрелки."},
+    {id: "laser-double", title: "Лазер", phase: "7", text: "Наносит 1 повреждение за каждый луч. Стена или первый робот останавливает лазер."},
+    {id: "wall", title: "Стена", phase: "Всегда", text: "Блокирует движение, толкание и лазерные лучи."},
+    {id: "pit", title: "Яма", phase: "Всегда", text: "Попавший сюда робот уничтожается и теряет жизнь."},
+    {id: "repair", title: "Ремонтный ключ", phase: "После регистра 5", text: "Становится архивом и снимает 1 повреждение в конце раунда."},
+    {id: "robot", title: "Робот и направление", phase: "2 и 7", text: "Выполняет карту, может толкать роботов и затем стреляет вперёд.", kind: "robot"},
+    {id: "flag", title: "Флаг с ключом", phase: "8", text: "Берётся только по порядку; также служит архивом и ремонтирует.", kind: "flag"},
+    {id: "archive", title: "Архивная метка", phase: "8", text: "Последняя сохранённая точка, в которой робот возрождается.", kind: "archive"}
+];
+
+function GuideToken({kind}) {
+    if (kind === "robot") return <span className="guide-robot-token"><svg viewBox="0 0 100 100" aria-hidden="true"><path d="M50 12 83 57H64v27H36V57H17Z"/></svg></span>;
+    if (kind === "flag") return <span className="guide-flag-token"><i className="flag-cloth">1</i><i className="flag-wrench"></i></span>;
+    return <span className="guide-archive-token">⚙</span>;
+}
+
+function GuidePhaseList({full = false}) {
+    return <ol className={full ? "guide-phase-timeline" : "quick-phases"}>
+        {GUIDE_PHASES.map(([title, text], index) => <li key={title}><b>{index + 1}</b><span><strong>{title}</strong>{full ? <small>{text}</small> : null}</span></li>)}
+    </ol>;
+}
+
+function QuickGuide({onOpen}) {
+    return <section className="panel quick-guide" aria-labelledby="quick-guide-title">
+        <div className="quick-guide-heading"><h2 id="quick-guide-title">Шпаргалка</h2>
+            <button type="button" className="quick-guide-open" onClick={onOpen}>Как играть</button></div>
+        <p className="quick-goal"><strong>Цель:</strong> активируйте все флаги строго по порядку.</p>
+        <GuidePhaseList/>
+        <p className="quick-repair">🔧 Ремонт на ключах и флагах — после пятого регистра.</p>
+    </section>;
+}
+
+class GuideModal extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = {tab: "how"};
+        this.dialogRef = React.createRef();
+        this.handleKeyDown = this.handleKeyDown.bind(this);
+    }
+
+    componentDidUpdate(previousProps) {
+        if (this.props.open && !previousProps.open) {
+            this.returnFocus = this.props.returnFocus || document.activeElement;
+            this.previousOverflow = document.body.style.overflow;
+            document.body.style.overflow = "hidden";
+            document.addEventListener("keydown", this.handleKeyDown);
+            this.setState({tab: "how"}, () => {
+                const close = this.dialogRef.current && this.dialogRef.current.querySelector(".guide-close");
+                if (close) close.focus();
+            });
+        } else if (!this.props.open && previousProps.open) this.releaseModal();
+    }
+
+    componentWillUnmount() {
+        if (this.props.open) this.releaseModal();
+    }
+
+    releaseModal() {
+        document.removeEventListener("keydown", this.handleKeyDown);
+        document.body.style.overflow = this.previousOverflow || "";
+        if (this.returnFocus && document.contains(this.returnFocus)) this.returnFocus.focus();
+    }
+
+    handleKeyDown(event) {
+        if (event.key === "Escape") {
+            event.preventDefault();
+            this.props.onClose();
+            return;
+        }
+        if (event.key !== "Tab" || !this.dialogRef.current) return;
+        const focusable = [...this.dialogRef.current.querySelectorAll("button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])")];
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+
+    selectTab(tab) {
+        this.setState({tab});
+    }
+
+    renderHow() {
+        return <div className="guide-copy guide-how">
+            <section className="guide-lead"><div><span className="guide-kicker">Цель игры</span><h3>Доберитесь до всех флагов по порядку</h3>
+                <p>Запрограммируйте робота так, чтобы он активировал флаги от первого до последнего. Побеждает завершивший маршрут; в этой версии также побеждает последний игрок, у которого остались жизни.</p></div>
+                <GuideToken kind="flag"/></section>
+            <div className="guide-rule-grid">
+                <article><b>1</b><h3>Составьте программу</h3><p>Выберите пять карт движения и разложите их в регистры слева направо. До готовности карты можно переставлять и менять местами.</p></article>
+                <article><b>2</b><h3>Смотрите на приоритет</h3><p>В каждом регистре роботы исполняют карты от большего приоритета к меньшему. Так определяется, кто движется первым.</p></article>
+                <article><b>3</b><h3>Двигайтесь и толкайте</h3><p>Робот не проходит сквозь стены. Войдя в занятую клетку, он толкает цепочку роботов, если за ней есть свободное место.</p></article>
+                <article><b>4</b><h3>Переживите поле</h3><p>После команд срабатывают элементы фабрики. Один и тот же порядок повторяется для каждого из пяти регистров.</p></article>
+            </div>
+            <section><h3>Порядок одного регистра</h3><GuidePhaseList full={true}/></section>
+            <aside className="guide-course-note">⚙ <span><strong>Специальные правила курса</strong> могут изменять эти базовые правила. Они показаны при выборе курса и во время партии.</span></aside>
+        </div>;
+    }
+
+    renderField() {
+        return <div className="guide-elements">
+            <div className="guide-element-grid">{GUIDE_ELEMENTS.map((item) => <article className="guide-element-card" key={item.id}>
+                <div className={`guide-element-visual ${item.kind ? "generated" : ""}`}>
+                    {item.kind ? <GuideToken kind={item.kind}/> : <img loading="lazy" src={`/roborally/assets/guide/${item.id}.webp`} alt=""/>}
+                </div>
+                <div className="guide-element-copy"><div><h3>{item.title}</h3><span className="guide-phase-badge">Фаза {item.phase}</span></div><p>{item.text}</p></div>
+            </article>)}</div>
+        </div>;
+    }
+
+    renderDamage() {
+        return <div className="guide-copy guide-damage">
+            <section className="guide-damage-scale"><div><b>0</b><span>полная рука<br/><strong>9 карт</strong></span></div><i></i><div><b>5–9</b><span>блокируются регистры<br/><strong>с 5-го к 1-му</strong></span></div><i></i><div className="danger"><b>10</b><span>робот уничтожен<br/><strong>−1 жизнь</strong></span></div></section>
+            <div className="guide-rule-grid">
+                <article><h3>Урон и жизнь</h3><p>Каждое повреждение уменьшает руку на одну карту. При 5–9 повреждениях регистры блокируются открытыми картами. При 10 повреждениях, падении в яму или за край робот теряет жизнь.</p></article>
+                <article><h3>Архив и возрождение</h3><p>Робот возвращается перед раздачей карт в последнюю архивную точку с двумя повреждениями. Можно выбрать направление; если точка занята — допустимую соседнюю клетку.</p></article>
+                <article><h3>Ремонт</h3><p>Робот на ключе или флаге сохраняет эту точку как архив и после пятого регистра снимает одно повреждение. Разблокированная карта сбрасывается.</p></article>
+                <article><h3>30-секундный таймер</h3><p>Когда готовыми стали все, кроме одного, последний игрок видит общий таймер. После истечения времени сервер случайно заполняет пустые регистры картами с его руки и фиксирует программу.</p></article>
+            </div>
+            <section className="guide-power-down"><div className="guide-power-token"><span>POWER<br/>DOWN</span></div><div><h3>Power Down</h3>
+                <p>Повреждённый робот тайно объявляет отключение вместе с текущей программой. Он полностью исполняет этот раунд и отключается только в следующем.</p>
+                <p>В начале отключённого раунда повреждения снимаются. Робот не получает карты, не исполняет команды и не стреляет, но конвейеры, толкатели, шестерни, стационарные лазеры, столкновения, флаги и ремонт продолжают действовать.</p>
+                <p>После раунда отключённые игроки одновременно решают, проснуться или остаться. Полученный во время отключения урон сохраняется при пробуждении и может заблокировать регистры.</p></div></section>
+            <aside className="guide-course-note">Специальные правила выбранного курса могут менять отдельные правила этой памятки.</aside>
+        </div>;
+    }
+
+    render() {
+        if (!this.props.open) return null;
+        const tabs = [["how", "Как играть"], ["field", "Элементы поля"], ["damage", "Урон и Power Down"]];
+        return <div className="guide-backdrop" onClick={(event) => event.target === event.currentTarget && this.props.onClose()}>
+            <section className="guide-modal" role="dialog" aria-modal="true" aria-labelledby="guide-modal-title" ref={this.dialogRef}>
+                <header className="guide-modal-header"><div><span>Справочник RoboRally</span><h2 id="guide-modal-title">Как управлять роботом и выжить на фабрике</h2></div>
+                    <button type="button" className="guide-close" aria-label="Закрыть справочник" onClick={this.props.onClose}>×</button></header>
+                <div className="guide-tabs" role="tablist" aria-label="Разделы справочника">{tabs.map(([id, label]) => <button type="button" role="tab" key={id}
+                    id={`guide-tab-${id}`} aria-selected={this.state.tab === id} aria-controls={`guide-panel-${id}`}
+                    className={this.state.tab === id ? "active" : ""} onClick={() => this.selectTab(id)}>{label}</button>)}</div>
+                <div className="guide-modal-content" role="tabpanel" id={`guide-panel-${this.state.tab}`} aria-labelledby={`guide-tab-${this.state.tab}`}>
+                    {this.state.tab === "how" ? this.renderHow() : this.state.tab === "field" ? this.renderField() : this.renderDamage()}
+                </div>
+            </section>
+        </div>;
+    }
 }
 
 function CourseSpecialRules({course}) {
@@ -463,6 +607,7 @@ class Lobby extends React.Component {
             <section className="lobby-intro panel">
                 <div><h2>Лобби · комната {state.roomId}</h2>
                     <p>Сначала вы находитесь среди зрителей. До начала партии роль можно менять свободно.</p></div>
+                <button type="button" className="lobby-guide-button" onClick={this.props.onOpenGuide}>Как играть</button>
                 <label className="nickname-field">Ваш никнейм
                     <span><input maxLength="40" value={this.state.nickname}
                         onChange={(event) => this.setState({nickname: event.target.value})}
@@ -868,8 +1013,19 @@ class Game extends React.Component {
         const boardHintsEnabled = localStorage.getItem("roborally-board-hints") !== "false";
         this.state = {inited: false, phase: "loading", playerNames: {}, playerSlots: [], robots: [], log: [], flags: [],
             boardScale, boardPanX: 0, boardPanY: 0, boardPanMode: false, boardHintsEnabled,
-            hudCollapsed: false, bottomDockCollapsed: false};
+            hudCollapsed: false, bottomDockCollapsed: false, guideOpen: false};
         this.privateState = {hand: [], selected: [], locked: false};
+        this.openGuide = this.openGuide.bind(this);
+        this.closeGuide = this.closeGuide.bind(this);
+    }
+
+    openGuide(event) {
+        this.guideReturnFocus = event && event.currentTarget ? event.currentTarget : document.activeElement;
+        this.setState({guideOpen: true});
+    }
+
+    closeGuide() {
+        this.setState({guideOpen: false});
     }
 
     setBoardScale(boardScale) {
@@ -947,7 +1103,7 @@ class Game extends React.Component {
                 <div><h1>RoboRally</h1><p>Комната {state.roomId} · {state.phase === "programming" ? "программирование" : state.phase === "resolving" ? "исполнение" : state.phase === "power-down-choice" ? "решение Power Down" : state.phase === "reentry" ? "возрождение" : state.phase === "finished" ? "финиш" : "лобби"}</p></div>
                 {state.userId === state.hostId && state.phase !== "lobby" ? <button onClick={() => this.socket.emit("restart-game")}>В лобби</button> : null}
             </header>
-            {state.phase === "lobby" ? <Lobby state={state} app={this}/> : <div className={`game-screen ${state.paused ? "is-paused" : ""}`}>
+            {state.phase === "lobby" ? <Lobby state={state} app={this} onOpenGuide={this.openGuide}/> : <div className={`game-screen ${state.paused ? "is-paused" : ""}`}>
                 {state.paused ? <section className="pause-banner" role="status"><strong>Игра на паузе</strong><span>Хост может продолжить игру из панели управления.</span></section> : null}
                 <ProgrammingTimer state={state}/>
                 <section className="game-layout">
@@ -990,7 +1146,7 @@ class Game extends React.Component {
                         <div className="dock-scroll">
                         <PlayerPanel state={state}/>
                         <CourseSpecialRules course={state.course}/>
-                        <FieldGuide/>
+                        <QuickGuide onOpen={this.openGuide}/>
                         <section className="panel log"><h2>Системный журнал</h2>{state.log.map((item, index) => <p key={index}>{item}</p>)}</section>
                         <HostControls state={state} app={this}/>
                         <div className="board-toolbar panel" aria-label="Масштаб игрового поля">
@@ -1034,6 +1190,7 @@ class Game extends React.Component {
                     </div>
                 </section> : null}
             </div>}
+            <GuideModal open={state.guideOpen} onClose={this.closeGuide} returnFocus={this.guideReturnFocus}/>
         </main>;
     }
 }

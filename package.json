@@ -18,10 +18,11 @@
     "test:special-rules": "node test/special-rules.js",
     "test:victory": "node test/victory.js",
     "test:pause": "node test/pause.js",
-    "test:browser": "node test/browser-hints.js && node test/browser-lasers.js && node test/browser-lobby.js && node test/browser-power-down.js && node test/browser-board-events.js && node test/browser-programming-timer.js && node test/browser-pause.js",
+    "test:browser": "node test/browser-hints.js && node test/browser-lasers.js && node test/browser-lobby.js && node test/browser-power-down.js && node test/browser-board-events.js && node test/browser-programming-timer.js && node test/browser-pause.js && node test/browser-guide.js",
     "test:pause:browser": "node test/browser-pause.js",
     "test:assets": "node test/web-assets.js",
-    "audit:boards": "node scripts/render-board-audit.js"
+    "audit:boards": "node scripts/render-board-audit.js",
+    "assets:guide": "node scripts/build-guide-assets.js"
   },
   "files": [
     "module.js",

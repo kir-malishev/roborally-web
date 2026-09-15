@@ -369,6 +369,14 @@ function shuffle(items) {
     return result;
 }
 
+// Engine code sends this.room as-is (updatePublicState and friends), so sets
+// that live in the room must serialize to arrays
+class JSONSet extends Set {
+    toJSON() {
+        return [...this];
+    }
+}
+
 function wait(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -381,7 +389,8 @@ function init(wsServer, gamePath) {
 
     class GameState extends wsServer.users.RoomState {
         constructor(hostId, hostData, userRegistry) {
-            super(hostId, hostData, userRegistry, registry.games.roborally.id, gamePath);
+            // Game is still in beta, so it has no entry in the engine's games list and no play time is counted
+            super(hostId, hostData, userRegistry, null, gamePath);
             this.players = {};
             this.deck = [];
             this.discard = [];
@@ -404,8 +413,8 @@ function init(wsServer, gamePath) {
                 playerSlots: Array(8).fill(null),
                 playerColors: {},
                 startAssignments: {},
-                onlinePlayers: new Set(),
-                spectators: new Set(),
+                onlinePlayers: new JSONSet(),
+                spectators: new JSONSet(),
                 robots: [],
                 flags: [],
                 log: ["Комната создана. Выберите роль игрока или зрителя."],
@@ -547,6 +556,31 @@ function init(wsServer, gamePath) {
             this.userRegistry.send(this.room.onlinePlayers, "state", this.publicState());
             this.room.onlinePlayers.forEach((userId) =>
                 this.userRegistry.send(userId, "player-state", this.privateState(userId)));
+        }
+
+        updatePublicState() {
+            this.update();
+        }
+
+        removePlayer(playerId) {
+            const slot = this.room.playerSlots.indexOf(playerId);
+            if (slot >= 0) {
+                if (this.room.phase !== "lobby")
+                    return this.userRegistry.send(this.room.hostId, "message", "Игрока нельзя удалить во время партии: сначала верните игру в лобби.");
+                this.room.playerSlots[slot] = null;
+                delete this.room.playerColors[playerId];
+                this.randomizeStartAssignments();
+                if (this.room.onlinePlayers.has(playerId))
+                    this.room.spectators.add(playerId);
+                else
+                    delete this.room.playerNames[playerId];
+                this.addLog(`${this.room.playerNames[playerId] || "Игрок"} удалён из игры хостом.`);
+            } else if (this.room.spectators.has(playerId)) {
+                this.room.spectators.delete(playerId);
+                delete this.room.playerNames[playerId];
+                this.emit("user-kicked", playerId);
+            }
+            this.update();
         }
 
         getRobot(userId) {
@@ -1609,7 +1643,38 @@ function init(wsServer, gamePath) {
             return true;
         }
 
+        getPlayerCount() {
+            return Object.keys(this.room.playerNames).length;
+        }
+
+        getActivePlayerCount() {
+            return this.room.onlinePlayers.size;
+        }
+
+        getLastInteraction() {
+            return this.lastInteraction || new Date(this.room.createTime);
+        }
+
+        getSnapshot() {
+            return {
+                room: {...this.room, onlinePlayers: [], spectators: [...this.room.spectators]},
+                players: this.players,
+                deck: this.deck,
+                discard: this.discard
+            };
+        }
+
+        setSnapshot(snapshot) {
+            Object.assign(this.room, snapshot.room);
+            this.room.onlinePlayers = new JSONSet();
+            this.room.spectators = new JSONSet(snapshot.room.spectators || []);
+            this.players = snapshot.players || {};
+            this.deck = snapshot.deck || [];
+            this.discard = snapshot.discard || [];
+        }
+
         userJoin(data) {
+            this.lastInteraction = new Date();
             const userId = data.userId;
             this.room.onlinePlayers.add(userId);
             if (!this.room.playerSlots.includes(userId))
@@ -1632,8 +1697,24 @@ function init(wsServer, gamePath) {
         }
 
         userEvent(userId, event, args) {
+            this.lastInteraction = new Date();
+            // Common engine events: chat, auth, profile, avatars, change-name
+            if (this.eventHandlers && this.eventHandlers[event]) {
+                Promise.resolve(this.eventHandlers[event](userId, ...args))
+                    .catch((error) => this.registry.log(`roborally ${event}: ${error.stack}`));
+                return;
+            }
             const value = args[0];
-            if ((event === "change-name" || event === "set-nickname") && typeof value === "string") {
+            if (event === "remove-player" && userId === this.room.hostId && typeof value === "string")
+                return this.removePlayer(value);
+            if (event === "give-host" && userId === this.room.hostId && typeof value === "string") {
+                if (!this.room.onlinePlayers.has(value)) return;
+                this.room.hostId = value;
+                this.emit("host-changed", userId, value);
+                this.addLog(`${this.room.playerNames[value]} теперь хост.`);
+                return this.update();
+            }
+            if (event === "set-nickname" && typeof value === "string") {
                 const nickname = value.trim().slice(0, 40);
                 if (!nickname)
                     return this.userRegistry.send(userId, "message", "Никнейм не может быть пустым.");

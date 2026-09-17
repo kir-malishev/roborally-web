@@ -1,18 +1,11 @@
 "use strict";
 
 const assert = require("assert");
-const path = require("path");
-const {spawn} = require("child_process");
-const {chromium} = require(path.resolve(__dirname, "../../demo-server/node_modules/playwright-core"));
+const {launchBrowser, openUser, startSandbox, stopSandbox} = require("./browser-support");
 
-const serverDir = path.resolve(__dirname, "../../demo-server");
 const port = process.env.POWER_DOWN_PORT || "3042";
-const server = spawn(process.execPath, [path.join(serverDir, "server.js")], {
-    cwd: serverDir, env: {...process.env, PORT: port}, stdio: ["ignore", "pipe", "pipe"]
-});
+const {server, ready} = startSandbox(port);
 let browser;
-let serverError = "";
-server.stderr.on("data", (chunk) => serverError += String(chunk));
 
 async function renderProgram(page, overrides = {}) {
     await page.evaluate((input) => {
@@ -29,18 +22,9 @@ async function renderProgram(page, overrides = {}) {
 }
 
 (async () => {
-    await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("server timeout")), 8000);
-        server.stdout.on("data", (chunk) => {
-            if (String(chunk).includes(port)) { clearTimeout(timeout); resolve(); }
-        });
-        server.once("error", reject);
-        server.once("exit", (code) => reject(new Error(`server exited: ${code}${serverError ? `\n${serverError}` : ""}`)));
-    });
-    browser = await chromium.launch({headless: true, executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"});
-    const page = await browser.newPage({viewport: {width: 1000, height: 700}});
-    await page.goto(`http://127.0.0.1:${port}/roborally?room=power-down-browser&player=one&name=One`);
-    await page.locator(".lobby-shell").waitFor();
+    await ready;
+    browser = await launchBrowser();
+    const {page} = await openUser(browser, {port, room: "power-down-browser", name: "One", viewport: {width: 1000, height: 700}});
 
     await renderProgram(page);
     const token = page.locator(".power-down-token");
@@ -106,5 +90,5 @@ async function renderProgram(page, overrides = {}) {
     process.exitCode = 1;
 }).finally(async () => {
     if (browser) await browser.close();
-    server.kill();
+    stopSandbox(server);
 });

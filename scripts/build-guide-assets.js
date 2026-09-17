@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const {createCanvas, loadImage} = require(path.resolve(__dirname, "../../demo-server/node_modules/@napi-rs/canvas"));
+const {createCanvas, loadImage} = require("@napi-rs/canvas");
 
 const SOURCE_DIR = path.resolve(__dirname, "../../Roborally/Поля целиком");
 const OUTPUT_DIR = path.resolve(__dirname, "../public/assets/guide");

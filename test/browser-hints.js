@@ -1,43 +1,19 @@
 "use strict";
 
 const assert = require("assert");
-const path = require("path");
-const {spawn} = require("child_process");
-const {chromium} = require(path.resolve(__dirname, "../../demo-server/node_modules/playwright-core"));
+const {launchBrowser, openUser, startSandbox, stopSandbox} = require("./browser-support");
 
-const root = path.resolve(__dirname, "../..");
-const serverDir = path.join(root, "demo-server");
 const port = process.env.HINTS_PORT || "3011";
-const server = spawn(process.execPath, [path.join(serverDir, "server.js")], {
-    cwd: serverDir,
-    env: {...process.env, PORT: port},
-    stdio: ["ignore", "pipe", "pipe"]
-});
+const {server, ready} = startSandbox(port);
 let browser;
 
 async function openPlayer(browser, player, name) {
-    const context = await browser.newContext({viewport: {width: 1440, height: 1000}});
-    const page = await context.newPage();
-    page.setDefaultTimeout(5000);
-    await page.goto(`http://127.0.0.1:${port}/roborally?room=hints-smoke&player=${player}&name=${encodeURIComponent(name)}`,
-        {waitUntil: "domcontentloaded", timeout: 15000});
-    await page.locator(".lobby").waitFor();
-    return {context, page};
+    return openUser(browser, {port, room: "hints-smoke", name, viewport: {width: 1440, height: 1000}, timeout: 12000});
 }
 
 (async () => {
-    await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("Demo server did not start")), 8000);
-        server.stdout.on("data", (chunk) => {
-            if (String(chunk).includes(port)) {
-                clearTimeout(timeout);
-                resolve();
-            }
-        });
-        server.once("error", reject);
-        server.once("exit", (code) => reject(new Error(`Demo server exited with ${code}`)));
-    });
-    browser = await chromium.launch({headless: true, executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"});
+    await ready;
+    browser = await launchBrowser();
     const host = await openPlayer(browser, "hints-host", "Хозяин");
     const guest = await openPlayer(browser, "hints-guest", "Гость");
     await host.page.getByRole("button", {name: "Присоединиться к игре"}).click();
@@ -134,11 +110,13 @@ async function openPlayer(browser, player, name) {
         assert.equal(await host.page.locator(".field-hint-wash rect").count(), expectedCells, `${courseName}: a continuous conveyor is split at its turn`);
     }
 
-    await host.page.locator('[data-hint-id="robot-hints-host"]').hover();
+    const hostId = await host.page.locator(".robot.own-robot").getAttribute("data-user-id");
+    const guestId = await host.page.locator('.robot:not(.own-robot)[title^="Гость:"]').getAttribute("data-user-id");
+    await host.page.locator(`[data-hint-id="robot-${hostId}"]`).hover();
     await host.page.locator(".field-tooltip").waitFor();
     assert((await host.page.locator(".field-tooltip").innerText()).includes("Хозяин (вы)"), "Own robot tooltip is incorrect");
 
-    await host.page.locator('[data-hint-id="robot-hints-guest"]').hover();
+    await host.page.locator(`[data-hint-id="robot-${guestId}"]`).hover();
     const guestTooltip = await host.page.locator(".field-tooltip").innerText();
     assert(guestTooltip.includes("Гость") && !guestTooltip.includes("Гость (вы)"), "Other robot tooltip is incorrect");
     if (process.env.HINTS_SCREENSHOT) {
@@ -165,5 +143,5 @@ async function openPlayer(browser, player, name) {
     process.exitCode = 1;
 }).finally(async () => {
     if (browser) await browser.close();
-    server.kill();
+    stopSandbox(server);
 });

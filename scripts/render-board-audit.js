@@ -2,7 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const {createCanvas, loadImage} = require(path.resolve(__dirname, "../../demo-server/node_modules/@napi-rs/canvas"));
+const {createCanvas, loadImage} = require("@napi-rs/canvas");
 const {BOARD_FEATURES, BOARD_CARDS, COURSE_CARDS, START_CARDS, START_LAYOUTS, orientFeatures} = require("../module");
 
 const DIRECTIONS = ["north", "east", "south", "west"];

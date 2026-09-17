@@ -500,6 +500,13 @@ function init(wsServer, gamePath) {
             } : {hand: [], selected: [], registerCards: [], lockedRegisters: [], locked: false};
         }
 
+        playerName(userId) {
+            const profile = this.room.authUsers && this.room.authUsers[userId];
+            return profile && profile.gameSettings && profile.gameSettings.syncName && profile.name
+                ? profile.name
+                : this.room.playerNames[userId] || "Игрок";
+        }
+
         addLog(text) {
             this.room.log.push(text);
             if (this.room.log.length > 30)
@@ -563,6 +570,7 @@ function init(wsServer, gamePath) {
         }
 
         removePlayer(playerId) {
+            const playerName = this.playerName(playerId);
             const slot = this.room.playerSlots.indexOf(playerId);
             if (slot >= 0) {
                 if (this.room.phase !== "lobby")
@@ -574,7 +582,7 @@ function init(wsServer, gamePath) {
                     this.room.spectators.add(playerId);
                 else
                     delete this.room.playerNames[playerId];
-                this.addLog(`${this.room.playerNames[playerId] || "Игрок"} удалён из игры хостом.`);
+                this.addLog(`${playerName} удалён из игры хостом.`);
             } else if (this.room.spectators.has(playerId)) {
                 this.room.spectators.delete(playerId);
                 delete this.room.playerNames[playerId];
@@ -740,7 +748,7 @@ function init(wsServer, gamePath) {
                     player.poweredDown = true;
                     player.powerDownNextRound = false;
                     player.locked = true;
-                    this.addLog(`${this.room.playerNames[userId]} входит в Power Down и снимает все повреждения.`);
+                    this.addLog(`${this.playerName(userId)} входит в Power Down и снимает все повреждения.`);
                 } else {
                     player.poweredDown = false;
                     player.powerDownNextRound = false;
@@ -880,7 +888,7 @@ function init(wsServer, gamePath) {
                 player.powerDownReentryChoiceRequired = false;
                 robot.x = null;
                 robot.y = null;
-                this.addLog(`${this.room.playerNames[robot.userId]} потерял последнюю жизнь.`);
+                this.addLog(`${this.playerName(robot.userId)} потерял последнюю жизнь.`);
                 this.requestSurvivalVictoryCheck();
                 return;
             }
@@ -888,7 +896,7 @@ function init(wsServer, gamePath) {
             robot.destroyedOrder = destructionId;
             robot.x = null;
             robot.y = null;
-            this.addLog(`${this.room.playerNames[robot.userId]} уничтожен (${reason}) и вернётся в конце раунда.`);
+            this.addLog(`${this.playerName(robot.userId)} уничтожен (${reason}) и вернётся в конце раунда.`);
         }
 
         preparePowerDownChoice() {
@@ -921,7 +929,7 @@ function init(wsServer, gamePath) {
                 this.players[id].powerDownNextRound = staysDown;
                 this.players[id].powerDownContinuation = staysDown;
             });
-            this.powerDownChoiceUsers.forEach((id) => this.addLog(`${this.room.playerNames[id]} ${this.powerDownChoices.get(id)
+            this.powerDownChoiceUsers.forEach((id) => this.addLog(`${this.playerName(id)} ${this.powerDownChoices.get(id)
                 ? "остаётся в Power Down на следующий раунд."
                 : "выходит из Power Down в следующем раунде."}`));
             this.powerDownChoiceUsers = [];
@@ -950,7 +958,7 @@ function init(wsServer, gamePath) {
             this.room.reentryQueue = queue;
             this.room.reentryUserId = queue[0];
             this.room.stage = "Выбор точки и направления возрождения";
-            this.addLog(`${this.room.playerNames[queue[0]]} выбирает возрождение.`);
+            this.addLog(`${this.playerName(queue[0])} выбирает возрождение.`);
             this.update();
             return true;
         }
@@ -1014,11 +1022,11 @@ function init(wsServer, gamePath) {
             if (player.powerDownReentryChoiceRequired) {
                 player.powerDownNextRound = choice.poweredDown;
                 player.powerDownReentryChoiceRequired = false;
-                this.addLog(`${this.room.playerNames[userId]} возродится ${choice.poweredDown ? "в Power Down" : "в обычном режиме"}.`);
+                this.addLog(`${this.playerName(userId)} возродится ${choice.poweredDown ? "в Power Down" : "в обычном режиме"}.`);
             }
             if (player.poweredDown)
                 this.syncPoweredDownRegisters(player);
-            this.addLog(`${this.room.playerNames[userId]} возрождается на клетке ${x + 1}, ${y + 1}.`);
+            this.addLog(`${this.playerName(userId)} возрождается на клетке ${x + 1}, ${y + 1}.`);
             this.room.reentryQueue.shift();
             if (player.damage >= 10) {
                 this.reboot(robot, "10 повреждений при возрождении");
@@ -1028,12 +1036,12 @@ function init(wsServer, gamePath) {
             if (this.room.phase === "finished") {
                 this.room.reentryQueue = [];
                 this.room.reentryUserId = null;
-                this.addLog(`${this.room.playerNames[this.room.winnerId]} остался единственным роботом с жизнями и победил!`);
+                this.addLog(`${this.playerName(this.room.winnerId)} остался единственным роботом с жизнями и победил!`);
                 return this.update();
             }
             this.room.reentryUserId = this.room.reentryQueue[0] || null;
             if (this.room.reentryUserId) {
-                this.addLog(`${this.room.playerNames[this.room.reentryUserId]} выбирает возрождение.`);
+                this.addLog(`${this.playerName(this.room.reentryUserId)} выбирает возрождение.`);
                 return this.update();
             }
             this.room.reentryQueue = [];
@@ -1097,14 +1105,14 @@ function init(wsServer, gamePath) {
             if (card.type === "right") this.turnRobot(robot, 1);
             if (card.type === "uturn") this.turnRobot(robot, 2);
             if (["left", "right", "uturn"].includes(card.type)) {
-                await this.showStage(`${this.room.playerNames[robot.userId]}: ${card.label}`);
+                await this.showStage(`${this.playerName(robot.userId)}: ${card.label}`);
                 return;
             }
             const steps = card.type === "move3" ? 3 : card.type === "move2" ? 2 : 1;
             const direction = card.type === "backup" ? rotate(robot.direction, 2) : robot.direction;
             for (let step = 0; step < steps && !robot.destroyed; step++) {
                 if (!this.move(robot, direction, card.label)) break;
-                await this.showStage(`${this.room.playerNames[robot.userId]}: ${card.label} · шаг ${step + 1}/${steps}`);
+                await this.showStage(`${this.playerName(robot.userId)}: ${card.label} · шаг ${step + 1}/${steps}`);
             }
         }
 
@@ -1119,9 +1127,9 @@ function init(wsServer, gamePath) {
                 this.syncPoweredDownRegisters(player);
                 const added = player.lockedRegisters.filter((register) => !previouslyLocked.has(register));
                 if (added.length)
-                    this.addLog(`${this.room.playerNames[robot.userId]} получает случайные карты в заблокированные регистры ${added.map((index) => index + 1).join(", ")}.`);
+                    this.addLog(`${this.playerName(robot.userId)} получает случайные карты в заблокированные регистры ${added.map((index) => index + 1).join(", ")}.`);
             }
-            this.addLog(`${this.room.playerNames[robot.userId]} получает ${amount} урон (${source}).`);
+            this.addLog(`${this.playerName(robot.userId)} получает ${amount} урон (${source}).`);
             if (player.damage >= 10)
                 this.reboot(robot, "10 повреждений");
         }
@@ -1316,7 +1324,7 @@ function init(wsServer, gamePath) {
             const addShot = (trace, emitter, amount = 1, sourceUserId = null) => {
                 this.laserEventCounter = (this.laserEventCounter || 0) + 1;
                 const shot = {id: this.laserEventCounter, source: sourceUserId ? "robot" : "board", sourceUserId, direction: emitter.direction,
-                    sourceColor: emitter.color || null, sourceName: sourceUserId ? this.room.playerNames[sourceUserId] : null,
+                    sourceColor: emitter.color || null, sourceName: sourceUserId ? this.playerName(sourceUserId) : null,
                     start: trace.start, end: trace.end, count: amount,
                     targetUserId: trace.target ? trace.target.userId : null};
                 shots.push(shot);
@@ -1363,7 +1371,7 @@ function init(wsServer, gamePath) {
                         player.checkpoints += 1;
                         player.checkpointAvailable = null;
                         this.addBoardEvent("flag", robot, {flagNumber: flag.number});
-                        this.addLog(`${this.room.playerNames[robot.userId]} активирует флаг ${flag.number}.`);
+                        this.addLog(`${this.playerName(robot.userId)} активирует флаг ${flag.number}.`);
                         if (player.checkpoints === this.room.flags.length) {
                             this.room.phase = "finished";
                             this.room.winnerId = robot.userId;
@@ -1396,7 +1404,7 @@ function init(wsServer, gamePath) {
                     this.syncPoweredDownRegisters(player);
                     const flag = this.room.flags.find((item) => item.x === robot.x && item.y === robot.y);
                     this.setRobotArchive(robot, flag || null);
-                    this.addLog(`${this.room.playerNames[robot.userId]} обслуживает робота на ремонтной клетке.`);
+                    this.addLog(`${this.playerName(robot.userId)} обслуживает робота на ремонтной клетке.`);
                     if (player.damage < previousDamage) {
                         repaired += 1;
                         this.addBoardEvent("heal", robot, {amount: previousDamage - player.damage});
@@ -1412,7 +1420,7 @@ function init(wsServer, gamePath) {
                 player.powerDownNextRound = !!player.powerDownIntent;
             });
             userIds.filter((userId) => this.players[userId].powerDownNextRound).forEach((userId) => {
-                this.addLog(`${this.room.playerNames[userId]} объявляет Power Down на следующий раунд.`);
+                this.addLog(`${this.playerName(userId)} объявляет Power Down на следующий раунд.`);
             });
         }
 
@@ -1498,8 +1506,8 @@ function init(wsServer, gamePath) {
             });
             if (this.room.phase === "finished") {
                 this.addLog(this.room.winnerReason === "last-robot-standing"
-                    ? `${this.room.playerNames[this.room.winnerId]} остался единственным роботом с жизнями и победил!`
-                    : `${this.room.playerNames[this.room.winnerId]} собрал все флаги и победил!`);
+                    ? `${this.playerName(this.room.winnerId)} остался единственным роботом с жизнями и победил!`
+                    : `${this.playerName(this.room.winnerId)} собрал все флаги и победил!`);
                 this.update();
             } else {
                 this.addLog("Регистр 5 завершён. Начинается следующий раунд.");
@@ -1619,7 +1627,7 @@ function init(wsServer, gamePath) {
             this.room.programmingTimer = {userId: userIds[0], userIds: [...userIds], global, endsAt, remaining: seconds};
             this.addLog(global
                 ? `Особое правило «${this.room.course.name}»: запущен общий таймер программирования на ${seconds} секунд.`
-                : `${this.room.playerNames[userIds[0]]} остаётся последним: запущен таймер программирования на 30 секунд.`);
+                : `${this.playerName(userIds[0])} остаётся последним: запущен таймер программирования на 30 секунд.`);
             this.scheduleProgrammingTimer(generation);
             return true;
         }
@@ -1646,9 +1654,9 @@ function init(wsServer, gamePath) {
                 player.autoFilledRegisters = registers;
                 player.locked = true;
                 if (registers.length)
-                    this.addLog(`Время ${this.room.playerNames[id]} истекло: пустые регистры заполнены случайными картами с руки.`);
+                    this.addLog(`Время ${this.playerName(id)} истекло: пустые регистры заполнены случайными картами с руки.`);
                 else
-                    this.addLog(`Время ${this.room.playerNames[id]} истекло: готовая программа автоматически зафиксирована.`);
+                    this.addLog(`Время ${this.playerName(id)} истекло: готовая программа автоматически зафиксирована.`);
                 return {userId: id, registers};
             });
             const first = fills[0];
@@ -1705,12 +1713,16 @@ function init(wsServer, gamePath) {
             this.room.onlinePlayers.add(userId);
             if (!this.room.playerSlots.includes(userId))
                 this.room.spectators.add(userId);
-            this.room.playerNames[userId] = String(this.room.playerNames[userId] || data.userName || "Гость").trim().slice(0, 40) || "Гость";
+            this.room.playerNames[userId] = String(this.room.playerNames[userId] || data.userName || "Гость").trim().slice(0, 60) || "Гость";
             this.update();
         }
 
         userLeft(userId) {
             this.room.onlinePlayers.delete(userId);
+            if (this.room.spectators.has(userId)) {
+                this.room.spectators.delete(userId);
+                delete this.room.playerNames[userId];
+            }
             this.update();
         }
 
@@ -1737,14 +1749,7 @@ function init(wsServer, gamePath) {
                 if (!this.room.onlinePlayers.has(value)) return;
                 this.room.hostId = value;
                 this.emit("host-changed", userId, value);
-                this.addLog(`${this.room.playerNames[value]} теперь хост.`);
-                return this.update();
-            }
-            if (event === "set-nickname" && typeof value === "string") {
-                const nickname = value.trim().slice(0, 40);
-                if (!nickname)
-                    return this.userRegistry.send(userId, "message", "Никнейм не может быть пустым.");
-                this.room.playerNames[userId] = nickname;
+                this.addLog(`${this.playerName(value)} теперь хост.`);
                 return this.update();
             }
             if (userId === this.room.hostId && this.room.phase === "lobby" && event === "select-course") {
@@ -1766,13 +1771,9 @@ function init(wsServer, gamePath) {
                     start: value.start, rotation, players: "2–8", min: 2, max: 8, length: "своя", level: "авторская", flags});
                 return;
             }
-            if ((event === "join-game" || event === "players-join") && this.room.phase === "lobby") {
+            if (event === "join-game" && this.room.phase === "lobby") {
                 if (this.room.playerSlots.includes(userId)) return;
-                if (event === "join-game" && value && typeof value === "object" && typeof value.nickname === "string") {
-                    const nickname = value.nickname.trim().slice(0, 40);
-                    if (nickname) this.room.playerNames[userId] = nickname;
-                }
-                const requestedSlot = event === "players-join" && Number.isInteger(value) && value >= 0 && value < 8 ? value : this.room.playerSlots.indexOf(null);
+                const requestedSlot = this.room.playerSlots.indexOf(null);
                 if (requestedSlot < 0 || this.room.playerSlots[requestedSlot] !== null)
                     return this.userRegistry.send(userId, "message", "В игре уже заняты все восемь мест.");
                 const usedColors = new Set(Object.entries(this.room.playerColors)
@@ -1782,7 +1783,7 @@ function init(wsServer, gamePath) {
                     this.room.playerColors[userId] = ROBOT_COLORS.find((color) => !usedColors.has(color));
                 this.room.spectators.delete(userId);
                 this.randomizeStartAssignments();
-                this.addLog(`${this.room.playerNames[userId]} присоединился к игре.`);
+                this.addLog(`${this.playerName(userId)} присоединился к игре.`);
                 return this.update();
             }
             if (event === "spectators-join" && this.room.phase === "lobby") {
@@ -1791,7 +1792,7 @@ function init(wsServer, gamePath) {
                 this.room.spectators.add(userId);
                 delete this.room.playerColors[userId];
                 this.randomizeStartAssignments();
-                this.addLog(`${this.room.playerNames[userId]} перешёл в зрители.`);
+                this.addLog(`${this.playerName(userId)} перешёл в зрители.`);
                 return this.update();
             }
             if (event === "shuffle-starts" && userId === this.room.hostId && this.room.phase === "lobby") {
@@ -1899,7 +1900,7 @@ function init(wsServer, gamePath) {
             if (event === "lock-program" && player.selected.every(Boolean)) {
                 player.locked = true;
                 player.autoFilledRegisters = [];
-                this.addLog(`${this.room.playerNames[userId]} готов.`);
+                this.addLog(`${this.playerName(userId)} готов.`);
                 if (this.areAllProgramsLocked()) {
                     this.cancelProgrammingTimer();
                     this.update();

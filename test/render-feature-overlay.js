@@ -2,7 +2,7 @@
 
 const path = require("path");
 const os = require("os");
-const {loadImage, createCanvas} = require(path.resolve(__dirname, "../../demo-server/node_modules/@napi-rs/canvas"));
+const {loadImage, createCanvas} = require("@napi-rs/canvas");
 const {BOARD_FEATURES} = require("../module");
 
 const files = {Cross: "Cross.png", Chess: "Chess.png", "Spin Zone": "Spin.png", "Risky Exchange": "exchange.png",

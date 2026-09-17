@@ -1,7 +1,7 @@
 "use strict";
 
 const fs=require("fs"),os=require("os"),path=require("path");
-const {loadImage,createCanvas}=require(path.resolve(__dirname,"../../demo-server/node_modules/@napi-rs/canvas"));
+const {loadImage,createCanvas}=require("@napi-rs/canvas");
 const files={Cross:"Cross.png",Chess:"Chess.png","Spin Zone":"Spin.png","Risky Exchange":"exchange.png",Island:"Island.png","Chop Shop":"ChopShop.png",Vault:"Vault.png",Maelstrom:"Maelstrom.png"};
 const board=process.argv[2]||"Cross",cells=(process.argv[3]||"").split(/\s+/).filter(Boolean);
 (async()=>{

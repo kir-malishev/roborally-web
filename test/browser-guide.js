@@ -1,40 +1,22 @@
 "use strict";
 
 const assert = require("assert");
-const path = require("path");
-const {spawn} = require("child_process");
-const {chromium} = require(path.resolve(__dirname, "../../demo-server/node_modules/playwright-core"));
+const {launchBrowser, openUser, startSandbox, stopSandbox} = require("./browser-support");
 
-const serverDir = path.resolve(__dirname, "../../demo-server");
 const port = process.env.GUIDE_BROWSER_PORT || "3046";
-const server = spawn(process.execPath, [path.join(serverDir, "server.js")], {
-    cwd: serverDir, env: {...process.env, PORT: port}, stdio: ["ignore", "pipe", "pipe"]
-});
+const {server, ready} = startSandbox(port);
 let browser;
-let serverError = "";
-server.stderr.on("data", (chunk) => serverError += String(chunk));
 
 const PHASES = ["Карты", "Роботы", "Экспресс", "Конвейеры", "Толкатели", "Шестерни", "Лазеры", "Флаги"];
 
 async function openPlayer(id, name, room) {
-    const page = await browser.newPage({viewport: {width: 1280, height: 900}});
-    page.setDefaultTimeout(8000);
-    await page.goto(`http://127.0.0.1:${port}/roborally?room=${room}&player=${id}&name=${encodeURIComponent(name)}`);
-    await page.locator(".lobby-shell").waitFor();
-    return page;
+    const result = await openUser(browser, {port, room, name, viewport: {width: 1280, height: 900}});
+    return result.page;
 }
 
 (async () => {
-    await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("server timeout")), 8000);
-        server.stdout.on("data", (chunk) => {
-            if (String(chunk).includes(port)) { clearTimeout(timeout); resolve(); }
-        });
-        server.once("error", reject);
-        server.once("exit", (code) => reject(new Error(`server exited: ${code}${serverError ? `\n${serverError}` : ""}`)));
-    });
-    browser = await chromium.launch({headless: true,
-        executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"});
+    await ready;
+    browser = await launchBrowser();
     const host = await openPlayer("guide-host", "Хост", "guide-browser");
     const guest = await openPlayer("guide-guest", "Гость", "guide-browser");
 
@@ -120,5 +102,5 @@ async function openPlayer(id, name, room) {
     process.exitCode = 1;
 }).finally(async () => {
     if (browser) await browser.close();
-    server.kill();
+    stopSandbox(server);
 });

@@ -3,7 +3,11 @@ const FIELD_VECTORS = {north: [0, -1], east: [1, 0], south: [0, 1], west: [-1, 0
 const OPPOSITE_DIRECTION = {north: "south", east: "west", south: "north", west: "east"};
 const DIRECTION_NAMES = {north: "вверх", east: "вправо", south: "вниз", west: "влево"};
 const LOBBY_ROBOT_COLORS = ["#f04444", "#2d82ff", "#ffd23f", "#27c56d", "#b66dff", "#ff8b38", "#32c8cb", "#f26bb4"];
-const EngineHostControls = typeof HostControls === "undefined" ? function () { return null; } : HostControls;
+
+function playerName(state, userId) {
+    const engineName = state.authUsers ? CommonRoom.getPlayerNameStatic(userId, state) : null;
+    return engineName || (state.playerNames || {})[userId] || userId || "игрок";
+}
 
 function boardImageUrl(state, board) {
     return state.boardImages[board];
@@ -195,10 +199,10 @@ class BoardHints extends React.Component {
             title: `Флаг ${flag.number}`, description: "Берётся по порядку; создаёт архив и ремонтирует после регистра 5. Фаза 8."}));
         (state.robots || []).filter((robot) => robot.archive && robot.archive.x != null && robot.archive.y != null && !robot.eliminated).forEach((robot) => items.push({id: `archive-${robot.userId}`,
             kind: "corner", x: robot.archive.x + .096, y: robot.archive.y + .096, title: "Архивная точка",
-            description: `Точка возрождения: ${state.playerNames[robot.userId] || robot.userId}${robot.userId === state.userId ? " (вы)" : ""}.`}));
+            description: `Точка возрождения: ${playerName(state, robot.userId)}${robot.userId === state.userId ? " (вы)" : ""}.`}));
         (state.robots || []).filter((robot) => robot.x != null && robot.y != null).forEach((robot) => items.push({id: `robot-${robot.userId}`,
             kind: "circle", x: robot.x + .5, y: robot.y + .5, r: .33, title: "Робот",
-            description: `${state.playerNames[robot.userId] || robot.userId}${robot.userId === state.userId ? " (вы)" : ""}. Направление: ${DIRECTION_NAMES[robot.direction]}. ${(((state.playerStats || {})[robot.userId]) || {}).poweredDown ? "Power Down: не стреляет." : "Стреляет в фазе 7."}`}));
+            description: `${playerName(state, robot.userId)}${robot.userId === state.userId ? " (вы)" : ""}. Направление: ${DIRECTION_NAMES[robot.direction]}. ${(((state.playerStats || {})[robot.userId]) || {}).poweredDown ? "Power Down: не стреляет." : "Стреляет в фазе 7."}`}));
 
         const hovered = enabled && this.state.hovered && items.find((item) => item.id === this.state.hovered.id);
         const draw = (item, hit) => {
@@ -237,7 +241,7 @@ class BoardHints extends React.Component {
     }
 }
 
-function Robot({robot, names, ownUserId}) {
+function Robot({robot, state, names = {}, ownUserId}) {
     if (robot.x == null || robot.y == null) return null;
     const style = {
         left: `${(robot.x + .5) / 12 * 100}%`,
@@ -246,7 +250,7 @@ function Robot({robot, names, ownUserId}) {
         "--robot-angle": `${Number.isFinite(robot.headingTurns) ? robot.headingTurns * 90 : DIRECTION_ANGLES[robot.direction]}deg`
     };
     return <div className={`robot ${robot.userId === ownUserId ? "own-robot" : ""} ${robot.eliminated ? "eliminated" : ""}`} style={style} data-user-id={robot.userId}
-                title={`${names[robot.userId] || robot.userId}: ${robot.x + 1}, ${robot.y + 1}`}>
+                title={`${state ? playerName(state, robot.userId) : names[robot.userId] || robot.userId}: ${robot.x + 1}, ${robot.y + 1}`}>
         <span className="robot-heading"><svg viewBox="0 0 100 100" aria-hidden="true">
             <path d="M50 5 93 48H68V92H32V48H7Z"/>
         </svg></span>
@@ -368,7 +372,7 @@ function LaserEffects({shots = [], robots = []}) {
 function PlayerPanel({state}) {
     const robotsByUser = {};
     state.robots.forEach((robot) => robotsByUser[robot.userId] = robot);
-    return <section className="players-panel panel">
+    return <section className="players-panel rr-panel">
         <h2>Роботы</h2>
         {state.playerSlots.filter(Boolean).map((userId) => {
             const robot = robotsByUser[userId] || {};
@@ -382,7 +386,7 @@ function PlayerPanel({state}) {
             return <div className="player-row" key={userId}>
                 <i style={{background: robot.color}}></i>
                 <span className={`${userId === state.userId ? "own-player-name" : "player-name"} player-name-status ${status}`}
-                    title={statusTitle || undefined}>{state.playerNames[userId]}</span>
+                    title={statusTitle || undefined}>{playerName(state, userId)}</span>
                 <span className="player-stat flags" title="Активированные флаги" aria-label={`Активированные флаги: ${stats.checkpoints || 0} из ${state.flags.length}`}>
                     <i aria-hidden="true">⚑</i><b>{stats.checkpoints || 0}/{state.flags.length}</b></span>
                 <span className="player-stat damage" title="Повреждения" aria-label={`Повреждения: ${stats.damage || 0}`}>
@@ -436,7 +440,7 @@ function GuidePhaseList({full = false}) {
 }
 
 function QuickGuide({onOpen}) {
-    return <section className="panel quick-guide" aria-labelledby="quick-guide-title">
+    return <section className="rr-panel quick-guide" aria-labelledby="quick-guide-title">
         <div className="quick-guide-heading"><h2 id="quick-guide-title">Шпаргалка</h2>
             <button type="button" className="quick-guide-open" onClick={onOpen}>Как играть</button></div>
         <p className="quick-goal"><strong>Цель:</strong> активируйте все флаги строго по порядку.</p>
@@ -559,13 +563,13 @@ class GuideModal extends React.Component {
 
 function CourseSpecialRules({course}) {
     if (!course || !course.specialRules) return null;
-    return <section className="panel active-special-rules"><h2>Special Rules · {course.name}</h2>
+    return <section className="rr-panel active-special-rules"><h2>Special Rules · {course.name}</h2>
         <p>{course.specialRules.description}</p></section>;
 }
 
 function GamePauseControls({state, app}) {
     if (state.userId !== state.hostId || state.phase === "lobby" || state.phase === "finished") return null;
-    return <section className="panel host-controls">
+    return <section className="rr-panel game-pause-controls">
         <h2>Управление игрой</h2>
         <button type="button" className={state.paused ? "resume" : "pause"}
             aria-pressed={!!state.paused}
@@ -579,28 +583,14 @@ function MemberHostControls({state, userId}) {
     const isHost = state.userId === state.hostId;
     if (!isHost || userId === state.userId) return null;
     return <span className="member-host-controls">
-        {state.onlinePlayers.includes(userId) ? <button type="button" className="host-button" title="Передать хоста" aria-label="Передать хоста"
+        {state.onlinePlayers.includes(userId) ? <button type="button" className="member-admin-button" title="Передать хоста" aria-label="Передать хоста"
             onClick={(evt) => window.commonRoom.handleGiveHost(userId, evt)}><span className="material-icons" aria-hidden="true">vpn_key</span></button> : null}
-        <button type="button" className="host-button" title="Удалить" aria-label="Удалить игрока"
+        <button type="button" className="member-admin-button" title="Удалить" aria-label="Удалить игрока"
             onClick={(evt) => window.commonRoom.handleRemovePlayer(userId, evt)}><span className="material-icons" aria-hidden="true">delete_forever</span></button>
     </span>;
 }
 
 class Lobby extends React.Component {
-    constructor(props) {
-        super(props);
-        this.state = {nickname: props.state.playerNames[props.state.userId] || ""};
-    }
-
-    saveNickname() {
-        const nickname = this.state.nickname.trim();
-        if (nickname) this.props.app.socket.emit("set-nickname", nickname);
-    }
-
-    joinGame() {
-        this.props.app.socket.emit("join-game", {nickname: this.state.nickname.trim()});
-    }
-
     render() {
         const {state, app} = this.props;
         const players = state.playerSlots.filter(Boolean);
@@ -616,28 +606,22 @@ class Lobby extends React.Component {
         const usedColors = new Set(players.filter((userId) => userId !== state.userId)
             .map(colorFor));
         return <section className="lobby-shell lobby">
-            <section className="lobby-intro panel">
+            <section className="lobby-intro rr-panel">
                 <div><h2>Лобби · комната {state.roomId}</h2>
                     <p>Сначала вы находитесь среди зрителей. До начала партии роль можно менять свободно.</p></div>
                 <button type="button" className="lobby-guide-button" onClick={this.props.onOpenGuide}>Как играть</button>
-                <label className="nickname-field">Ваш никнейм
-                    <span><input maxLength="40" value={this.state.nickname}
-                        onChange={(event) => this.setState({nickname: event.target.value})}
-                        onKeyDown={(event) => event.key === "Enter" && this.saveNickname()}/>
-                    <button type="button" onClick={() => this.saveNickname()}>Сохранить</button></span>
-                </label>
                 <div className="role-actions">
                     <button className={isPlayer ? "primary" : ""} disabled={isPlayer || playerCount >= 8}
-                        onClick={() => this.joinGame()}>
+                        onClick={() => app.socket.emit("join-game")}>
                         {isPlayer ? "Вы присоединились ✓" : "Присоединиться к игре"}</button>
                     <button className={!isPlayer ? "primary" : ""} disabled={!isPlayer}
                         onClick={() => app.socket.emit("spectators-join")}>Остаться зрителем</button>
                 </div>
             </section>
-            <section className="lobby-members panel">
+            <section className="lobby-members rr-panel">
                 <div className="member-column"><h3>Игроки <small>{playerCount}/8</small></h3>
                     {players.length ? players.map((userId) => <div className="lobby-member" key={userId}>
-                        <i style={{background: colorFor(userId)}}></i>
+                        <i className="lobby-robot-color" style={{background: colorFor(userId)}}></i>
                         <span><PlayerName data={state} id={userId}/> {userId === state.hostId ? <small>хост</small> : null}</span>
                         <MemberHostControls state={state} userId={userId}/>
                         <em>старт {((state.startAssignments || {})[userId] ?? 0) + 1}</em>
@@ -660,7 +644,7 @@ class Lobby extends React.Component {
                 </div> : null}
             </section>
             <CourseSetup state={state} app={app} playerCount={playerCount} readOnly={!isHost}/>
-            <section className="lobby-start panel">
+            <section className="lobby-start rr-panel">
                 {isHost ? <><button className="primary" disabled={!canStart} onClick={() => app.socket.emit("start-game")}>Начать игру</button>
                     {!canStart ? <p>Для курса «{state.course.name}» требуется игроков: {state.course.players}.</p> : <p>Курс и состав готовы.</p>}</>
                     : <p>Хост начнёт игру, когда на выбранном курсе будет достаточно игроков.</p>}
@@ -686,7 +670,7 @@ function CourseFieldContents({course, state, flagClassName, showLobbyRobots = fa
             if (!position) return null;
             const color = (state.playerColors || {})[userId] || (state.robotColors || LOBBY_ROBOT_COLORS)[start];
             return <span className="course-preview-robot" data-start={start + 1} data-user-id={userId} key={userId}
-                title={`${state.playerNames[userId] || userId}: старт ${start + 1}`}
+                title={`${playerName(state, userId)}: старт ${start + 1}`}
                 style={{left: `${(position.x + .5) / 12 * 100}%`, top: `${(position.y + .5) / 16 * 100}%`, "--robot-color": color}}>
                 <b>↑</b><small>{start + 1}</small>
             </span>;
@@ -734,7 +718,7 @@ class CourseSetup extends React.Component {
         const {state, app, playerCount, readOnly} = this.props;
         const selected = state.course.id;
         const previewFlags = this.state.flags;
-        return <section className="course-setup panel">
+        return <section className="course-setup rr-panel">
             <div className="course-heading"><div><h3>Готовые курсы</h3><p>Игроков сейчас: {playerCount}. Подходящие курсы отмечены зелёной меткой.</p></div>
                 {readOnly ? <span>Выбирает хост</span> : <span>Выберите курс</span>}</div>
             <div className="course-list">{state.courses.map((course) => <button key={course.id}
@@ -818,7 +802,7 @@ function ProgrammingTimer({state}) {
     if (automatic) {
         const fills = automatic.fills || [{userId: automatic.userId, registers: automatic.registers || []}];
         const details = fills.map((fill) => {
-            const name = state.playerNames[fill.userId] || fill.userId;
+            const name = playerName(state, fill.userId);
             return fill.registers.length ? `${name}: ${fill.registers.map((register) => register + 1).join(", ")}` : `${name}: программа зафиксирована`;
         }).join(" · ");
         return <section className="programming-timer expired" role="status" aria-live="assertive">
@@ -829,7 +813,7 @@ function ProgrammingTimer({state}) {
     const timer = state.programmingTimer;
     if (!timer) return null;
     const remaining = Math.max(0, Number(timer.remaining) || 0);
-    const pendingNames = (timer.userIds || [timer.userId]).map((userId) => state.playerNames[userId] || userId).join(", ");
+    const pendingNames = (timer.userIds || [timer.userId]).map((userId) => playerName(state, userId)).join(", ");
     return <section className={`programming-timer ${timer.paused ? "paused" : remaining <= 10 ? "warning" : ""}`} role="timer" aria-live="polite">
         <span className="timer-clock" aria-hidden="true"><strong>{remaining}</strong><small>сек</small></span>
         <div><strong>{timer.paused ? "Таймер приостановлен" : timer.global ? "Особый таймер курса" : "Последний игрок программирует"}</strong>
@@ -839,7 +823,7 @@ function ProgrammingTimer({state}) {
 
 function Program({state, privateState, app}) {
     if (state.phase !== "programming" || !state.playerSlots.includes(state.userId)) return null;
-    if (privateState.poweredDown) return <section className="program power-down-active panel">
+    if (privateState.poweredDown) return <section className="program power-down-active rr-panel">
         <PowerDownToken selected confirmed disabled title="Робот находится в Power Down"/>
         <div><h2>Power Down · раунд {state.round}</h2><p>Повреждения сняты. Робот не получает карты и не двигается самостоятельно, но поле продолжает на него воздействовать.</p></div>
     </section>;
@@ -873,7 +857,7 @@ function Program({state, privateState, app}) {
         }).sort((left, right) => left.distance - right.distance)[0];
         if (nearest) drop(event, nearest.register);
     };
-    return <section className="program panel">
+    return <section className="program rr-panel">
         <div className="program-heading">
             <div><h2>Программирование · раунд {state.round}</h2><p>Выберите ровно 5 карт. Их порядок — порядок регистров.</p></div>
             <div className="program-actions">
@@ -935,11 +919,11 @@ function PublicPrograms({state}) {
         return resolving || (program.lockedRegisters || []).some((index) => !!program.cards[index]);
     });
     if (!users.length) return null;
-    return <section className="public-programs panel"><h2>{resolving ? "Регистры роботов" : "Открытые заблокированные регистры"}</h2>
+    return <section className="public-programs rr-panel"><h2>{resolving ? "Регистры роботов" : "Открытые заблокированные регистры"}</h2>
         {users.map((userId) => {
             const program = (state.programs && state.programs[userId]) || {cards: []};
             return <div className="public-program-row" key={userId}>
-                <span className={userId === state.userId ? "own-player-name" : "player-name"}>{state.playerNames[userId]}
+                <span className={userId === state.userId ? "own-player-name" : "player-name"}>{playerName(state, userId)}
                     {((state.playerStats || {})[userId] || {}).powerDownNextRound ? <small>Power Down далее</small> : null}</span>
                 <div>{[0,1,2,3,4].map((index) => {
                     const card = program.cards[index];
@@ -961,7 +945,7 @@ function PowerDownChoicePanel({state, privateState, app}) {
     if (state.phase !== "power-down-choice") return null;
     const progress = state.powerDownChoice || {answered: 0, total: 0};
     const choice = privateState.powerDownChoice || {eligible: false, answered: false, choice: null};
-    return <section className="power-down-choice-panel panel">
+    return <section className="power-down-choice-panel rr-panel">
         <div><h2>Продолжить Power Down?</h2><p>Ответили: {progress.answered} из {progress.total}. Решения откроются одновременно.</p></div>
         {choice.eligible ? <div className="power-down-choice-actions">
             <button type="button" className={choice.answered && choice.choice === false ? "selected" : ""}
@@ -990,12 +974,12 @@ class ReentryPanel extends React.Component {
         const {state, privateState, app} = this.props;
         if (state.phase !== "reentry") return null;
         const reentry = privateState.reentry || {active: false, candidates: []};
-        const activeName = state.playerNames[state.reentryUserId] || "игрок";
+        const activeName = playerName(state, state.reentryUserId);
         if (!reentry.active)
-            return <section className="reentry-panel panel"><h2>Возрождение</h2><p>Ожидаем, пока {activeName} выберет клетку и направление.</p></section>;
+            return <section className="reentry-panel rr-panel"><h2>Возрождение</h2><p>Ожидаем, пока {activeName} выберет клетку и направление.</p></section>;
         const arrows = {north: "↑", east: "→", south: "↓", west: "←"};
         const modeChosen = !reentry.needsPowerDownChoice || this.state.poweredDown !== null;
-        return <section className="reentry-panel panel">
+        return <section className="reentry-panel rr-panel">
             <h2>Выберите возрождение</h2>
             <p>Сначала укажите режим, если он доступен, затем клетку и направление робота.</p>
             {reentry.needsPowerDownChoice ? <div className="reentry-power-down-choice">
@@ -1110,6 +1094,7 @@ class Game extends React.Component {
             this.forceUpdate();
         });
         this.socket.on("message", (message) => popup.alert({content: message}));
+        this.socket.on("ping", (id) => this.socket.emit("pong", id));
         this.socket.emit("init", initArgs);
     }
 
@@ -1121,7 +1106,7 @@ class Game extends React.Component {
             || state.phase === "resolving" || state.phase === "finished";
         return <React.Fragment>
         <CommonRoom state={state} app={this}/>
-        <EngineHostControls app={this} data={state} timerControls={[]}
+        <HostControls app={this} data={state} timerControls={[]}
             emitEvent={(...args) => this.socket.emit(...args)}/>
         <main className="roborally-app">
             <header>
@@ -1150,14 +1135,14 @@ class Game extends React.Component {
                                 </div>)}
                                 {state.robots.filter((robot) => robot.archive && robot.archive.x != null && robot.archive.y != null && !robot.eliminated).map((robot) => <div className="archive-marker"
                                     key={`archive-${robot.userId}`} style={{left: `${robot.archive.x / 12 * 100 + .8}%`, top: `${robot.archive.y / 16 * 100 + .6}%`, background: robot.color}}
-                                    title={`Архив: ${state.playerNames[robot.userId]}`}>⚙</div>)}
+                                    title={`Архив: ${playerName(state, robot.userId)}`}>⚙</div>)}
                                 {state.phase === "reentry" && this.privateState.reentry && this.privateState.reentry.active ? this.privateState.reentry.candidates.map((candidate, index) =>
                                     <div className="reentry-cell-marker" key={`reentry-${candidate.x}-${candidate.y}`}
                                         style={{gridColumn: `${candidate.x + 1} / ${candidate.x + 2}`, gridRow: `${candidate.y + 1} / ${candidate.y + 2}`}}>
                                         {candidate.archive ? "A" : index + 1}
                                     </div>) : null}
                                 {state.robots.filter((robot) => robot.death).map((robot) => <RobotDeath key={`${robot.userId}-${robot.death.id}`} robot={robot}/>)}
-                                {state.robots.map((robot) => <Robot key={robot.userId} robot={robot} names={state.playerNames} ownUserId={state.userId}/>)}
+                                {state.robots.map((robot) => <Robot key={robot.userId} robot={robot} state={state} ownUserId={state.userId}/>)}
                                 <BoardEvents events={state.boardEvents}/>
                                 <LaserEffects shots={state.laserShots} robots={state.robots}/></div>
                             <BoardHints state={state} enabled={state.boardHintsEnabled}/>
@@ -1172,9 +1157,9 @@ class Game extends React.Component {
                         <PlayerPanel state={state}/>
                         <CourseSpecialRules course={state.course}/>
                         <QuickGuide onOpen={this.openGuide}/>
-                        <section className="panel log"><h2>Системный журнал</h2>{state.log.map((item, index) => <p key={index}>{item}</p>)}</section>
+                        <section className="rr-panel log"><h2>Системный журнал</h2>{state.log.map((item, index) => <p key={index}>{item}</p>)}</section>
                         <GamePauseControls state={state} app={this}/>
-                        <div className="board-toolbar panel" aria-label="Масштаб игрового поля">
+                        <div className="board-toolbar rr-panel" aria-label="Масштаб игрового поля">
                             <button type="button" title="Уменьшить поле" aria-label="Уменьшить поле"
                                 disabled={state.boardScale <= 30} onClick={() => this.setBoardScale(state.boardScale - 10)}>−</button>
                             <span>{state.boardScale}%</span>
@@ -1195,7 +1180,7 @@ class Game extends React.Component {
                                     this.setState({boardHintsEnabled: enabled});
                                 }}>?</button>
                         </div>
-                        {state.phase === "resolving" ? <section className="panel stage"><h2>Сейчас</h2><p>{state.stage}</p></section> : null}
+                        {state.phase === "resolving" ? <section className="rr-panel stage"><h2>Сейчас</h2><p>{state.stage}</p></section> : null}
                         </div>
                     </aside>
                 </section>
@@ -1209,7 +1194,7 @@ class Game extends React.Component {
                         <PowerDownChoicePanel state={state} privateState={this.privateState} app={this}/>
                         <ReentryPanel state={state} privateState={this.privateState} app={this}/>
                         <PublicPrograms state={state}/>
-                        {state.phase === "finished" ? <section className="winner panel"><h2>Победитель: {state.playerNames[state.winnerId]}</h2>
+                        {state.phase === "finished" ? <section className="winner rr-panel"><h2>Победитель: {playerName(state, state.winnerId)}</h2>
                             <p>{state.winnerReason === "last-robot-standing" ? "Все остальные роботы потеряли последние жизни." : "Все контрольные флаги активированы."}</p>
                         </section> : null}
                     </div>

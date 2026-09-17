@@ -2,7 +2,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const {loadImage, createCanvas} = require(path.resolve(__dirname, "../../demo-server/node_modules/@napi-rs/canvas"));
+const {loadImage, createCanvas} = require("@napi-rs/canvas");
 const init = require("../module");
 const {BOARD_FEATURES, COURSE_CARDS, START_CARDS} = init;
 

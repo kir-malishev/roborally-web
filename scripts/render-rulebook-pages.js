@@ -3,10 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 const {pathToFileURL} = require("url");
-const {createCanvas} = require(path.resolve(__dirname, "../../demo-server/node_modules/@napi-rs/canvas"));
+const {createCanvas} = require("@napi-rs/canvas");
 
 (async () => {
-    const pdfjs = await import(pathToFileURL(path.resolve(__dirname, "../../demo-server/node_modules/pdfjs-dist/legacy/build/pdf.mjs")));
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const document = await pdfjs.getDocument({url: pathToFileURL(path.resolve(__dirname, "../../Roborally/roborally.pdf")).href}).promise;
     const output = path.resolve(process.argv[2] || path.join(__dirname, "../rulebook-pages"));
     const pages = process.argv.slice(3).map(Number).filter((number) => number >= 1 && number <= document.numPages);

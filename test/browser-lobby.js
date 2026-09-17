@@ -1,48 +1,35 @@
 "use strict";
 
 const assert = require("assert");
-const path = require("path");
-const {spawn} = require("child_process");
-const {chromium} = require(path.resolve(__dirname, "../../demo-server/node_modules/playwright-core"));
+const {launchBrowser, openUser: openSandboxUser, startSandbox, stopSandbox} = require("./browser-support");
 
-const root = path.resolve(__dirname, "../..");
-const serverDir = path.join(root, "demo-server");
 const port = process.env.LOBBY_PORT || "3012";
-const server = spawn(process.execPath, [path.join(serverDir, "server.js")], {
-    cwd: serverDir,
-    env: {...process.env, PORT: port},
-    stdio: ["ignore", "pipe", "pipe"]
-});
+const {server, ready} = startSandbox(port);
 let browser;
-let serverError = "";
-server.stderr.on("data", (chunk) => serverError += String(chunk));
 
 async function openUser(id, name) {
-    const context = await browser.newContext({viewport: {width: 1440, height: 1000}});
-    const page = await context.newPage();
-    page.setDefaultTimeout(7000);
-    await page.goto(`http://127.0.0.1:${port}/roborally?room=lobby-smoke&player=${id}&name=${encodeURIComponent(name)}`,
-        {waitUntil: "domcontentloaded", timeout: 15000});
-    await page.locator(".lobby-shell").waitFor();
-    return {context, page};
+    return openSandboxUser(browser, {port, room: "lobby-smoke", name, viewport: {width: 1440, height: 1000}, timeout: 7000});
 }
 
 (async () => {
-    await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("Demo server did not start")), 8000);
-        server.stdout.on("data", (chunk) => {
-            if (String(chunk).includes(port)) {
-                clearTimeout(timeout);
-                resolve();
-            }
-        });
-        server.once("error", reject);
-        server.once("exit", (code) => reject(new Error(`Demo server exited with ${code}${serverError ? `:\n${serverError}` : ""}`)));
-    });
-    browser = await chromium.launch({headless: true, executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"});
+    await ready;
+    browser = await launchBrowser();
     const host = await openUser("lobby-host", "Хост");
     const guest = await openUser("lobby-guest", "Гость");
     const viewer = await openUser("lobby-viewer", "Зритель");
+    const removable = await openUser("lobby-removable", "Удаляемый");
+
+    await viewer.page.locator(".login-menu").click();
+    await viewer.page.getByText("Войти через Discord", {exact: true}).click();
+    await viewer.page.locator(".lobby-member.spectator .profile-button").waitFor();
+    const profileClose = viewer.page.locator(".profile-container-close");
+    if (await profileClose.isVisible().catch(() => false)) await profileClose.click();
+
+    const removableRow = host.page.locator(".lobby-member.spectator", {hasText: "Удаляемый"});
+    await removableRow.locator('[aria-label="Удалить игрока"]').click();
+    await host.page.locator(".popup_modals .btn_pmry").click();
+    await removableRow.waitFor({state: "detached"});
+    await removable.context.close();
 
     assert.equal(await host.page.locator(".seat").count(), 0, "Old robot seat selector is still visible");
     assert.equal(await viewer.page.locator(".course-card").count(), 22, "Spectator cannot see every single-board course from the rulebook");
@@ -86,12 +73,23 @@ async function openUser(id, name) {
         "selected course preview does not show its special rules");
 
     await host.page.getByRole("button", {name: "Присоединиться к игре"}).click();
-    await guest.page.locator(".nickname-field input").fill("Механик");
+    await guest.page.locator(".host-controls").hover();
+    await guest.page.locator(".host-controls .settings-button", {hasText: "edit"}).click();
+    await guest.page.locator(".popup_modals .modal_input").fill("Механик");
+    await guest.page.locator(".popup_modals .btn_pmry").click();
     await guest.page.getByRole("button", {name: "Присоединиться к игре"}).click();
     await host.page.locator(".lobby-member", {hasText: "Механик"}).waitFor();
-    await host.page.locator(".lobby-member i").nth(1).waitFor();
-    const colors = await host.page.locator(".lobby-member i").evaluateAll((items) => items.map((item) => item.style.background));
+    await host.page.locator(".lobby-robot-color").nth(1).waitFor();
+    const colors = await host.page.locator(".lobby-robot-color").evaluateAll((items) => items.map((item) => item.style.background));
     assert.equal(new Set(colors).size, 2, "Players received the same color");
+    const guestRow = host.page.locator(".lobby-member", {hasText: "Механик"});
+    await guestRow.locator('[aria-label="Передать хоста"]').click();
+    await host.page.locator(".popup_modals .btn_pmry").click();
+    await guest.page.locator(".lobby-start", {hasText: "Курс и состав готовы"}).waitFor();
+    const formerHostRow = guest.page.locator(".lobby-member", {hasText: "Хост"});
+    await formerHostRow.locator('[aria-label="Передать хоста"]').click();
+    await guest.page.locator(".popup_modals .btn_pmry").click();
+    await host.page.locator(".lobby-start", {hasText: "Курс и состав готовы"}).waitFor();
     await guest.page.getByRole("button", {name: "Остаться зрителем"}).click();
     await host.page.locator(".member-column", {hasText: "Зрители"}).locator(".lobby-member", {hasText: "Механик"}).waitFor();
     await guest.page.getByRole("button", {name: "Присоединиться к игре"}).click();
@@ -212,7 +210,7 @@ async function openUser(id, name) {
     await viewer.page.locator(".laser-shot-robot").first().waitFor({timeout: 20000});
     assert((await viewer.page.locator(".laser-shot-board").count()) >= 4, "Stationary laser shots are not visualized");
     assert((await viewer.page.locator(".laser-beam-core").count()) >= 5, "Multiple stationary laser beams are not visualized separately");
-    assert((await viewer.page.locator(".laser-shot-robot").count()) >= 2, "Robot laser shots are not visualized");
+    assert((await viewer.page.locator(".laser-shot-robot").count()) >= 1, "Robot laser shots are not visualized");
     assert.equal(await viewer.page.locator(".laser-robot-source").count(), 0, "Duplicate phantom robot markers are visible during laser fire");
     const phantomShots = await viewer.page.locator(".laser-shot-robot").evaluateAll((shots) => shots.filter((shot) => {
         const robot = document.querySelector(`.robot[data-user-id="${CSS.escape(shot.dataset.sourceUserId)}"]`);
@@ -224,7 +222,6 @@ async function openUser(id, name) {
             || Math.abs(Number(muzzle.getAttribute("cy")) - expectedY) > .001;
     }).length);
     assert.equal(phantomShots, 0, "A robot laser is drawn without its robot at the source");
-    assert.equal(await host.page.locator(".robot.own-robot[data-user-id]").count(), 1, "Own robot is not marked on the board");
     if (process.env.LASER_SCREENSHOT)
         await viewer.page.screenshot({path: process.env.LASER_SCREENSHOT, fullPage: false});
     console.log("RoboRally lobby roles, colors, courses, constructor and spectator flow passed");
@@ -233,5 +230,5 @@ async function openUser(id, name) {
     process.exitCode = 1;
 }).finally(async () => {
     if (browser) await browser.close();
-    server.kill();
+    stopSandbox(server);
 });

@@ -5,16 +5,14 @@ param(
     [string]$Output = ""
 )
 
-$projectRoot = Split-Path -Parent $PSScriptRoot
 $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
-$nodePath = if ($nodeCommand) {
-    $nodeCommand.Source
-} else {
-    Join-Path $projectRoot "..\demo-server\.tools\node\node.exe"
+if (-not $nodeCommand) {
+    throw "Node.js 20 или новее не найден в PATH."
 }
-
-if (-not (Test-Path -LiteralPath $nodePath -PathType Leaf)) {
-    throw "Node.js не найден ни в PATH, ни в demo-server/.tools/node."
+$nodePath = $nodeCommand.Source
+$nodeVersion = & $nodePath -p "process.versions.node"
+if ($LASTEXITCODE -ne 0 -or [int]($nodeVersion -split '\.')[0] -lt 20) {
+    throw "Для аудита полей требуется Node.js 20 или новее."
 }
 
 $env:AUDIT_SIZE = [string]$Size

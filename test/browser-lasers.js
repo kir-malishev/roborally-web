@@ -1,34 +1,19 @@
 "use strict";
 
 const assert = require("assert");
-const path = require("path");
-const {spawn} = require("child_process");
-const {chromium} = require(path.resolve(__dirname, "../../demo-server/node_modules/playwright-core"));
+const {launchBrowser, openUser: openSandboxUser, startSandbox, stopSandbox} = require("./browser-support");
 
-const serverDir = path.resolve(__dirname, "../../demo-server");
 const port = process.env.LASER_PORT || "3041";
-const server = spawn(process.execPath, [path.join(serverDir, "server.js")], {
-    cwd: serverDir, env: {...process.env, PORT: port}, stdio: ["ignore", "pipe", "pipe"]
-});
+const {server, ready} = startSandbox(port);
 let browser;
 
 async function openUser(id, name) {
-    const context = await browser.newContext({viewport: {width: 1280, height: 900}});
-    const page = await context.newPage();
-    await page.goto(`http://127.0.0.1:${port}/roborally?room=laser-regression&player=${id}&name=${encodeURIComponent(name)}`);
-    await page.locator(".lobby-shell").waitFor();
-    return {context, page};
+    return openSandboxUser(browser, {port, room: "laser-regression", name, viewport: {width: 1280, height: 900}});
 }
 
 (async () => {
-    await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("server timeout")), 8000);
-        server.stdout.on("data", (chunk) => {
-            if (String(chunk).includes(port)) { clearTimeout(timeout); resolve(); }
-        });
-        server.once("exit", (code) => reject(new Error(`server exited: ${code}`)));
-    });
-    browser = await chromium.launch({headless: true, executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"});
+    await ready;
+    browser = await launchBrowser();
     const host = await openUser("laser-host", "Хост");
     const guest = await openUser("laser-guest", "Гость");
     await host.page.getByRole("button", {name: "Присоединиться к игре"}).click();
@@ -80,5 +65,5 @@ async function openUser(id, name) {
     console.error(error.stack || error); process.exitCode = 1;
 }).finally(async () => {
     if (browser) await browser.close();
-    server.kill();
+    stopSandbox(server);
 });

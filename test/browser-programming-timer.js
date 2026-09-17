@@ -1,33 +1,16 @@
 "use strict";
 
 const assert = require("assert");
-const path = require("path");
-const {spawn} = require("child_process");
-const {chromium} = require(path.resolve(__dirname, "../../demo-server/node_modules/playwright-core"));
+const {launchBrowser, openUser, startSandbox, stopSandbox} = require("./browser-support");
 
-const serverDir = path.resolve(__dirname, "../../demo-server");
 const port = process.env.PROGRAMMING_TIMER_PORT || "3044";
-const server = spawn(process.execPath, [path.join(serverDir, "server.js")], {
-    cwd: serverDir, env: {...process.env, PORT: port}, stdio: ["ignore", "pipe", "pipe"]
-});
+const {server, ready} = startSandbox(port);
 let browser;
-let serverError = "";
-server.stderr.on("data", (chunk) => serverError += String(chunk));
 
 (async () => {
-    await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("server timeout")), 8000);
-        server.stdout.on("data", (chunk) => {
-            if (String(chunk).includes(port)) { clearTimeout(timeout); resolve(); }
-        });
-        server.once("error", reject);
-        server.once("exit", (code) => reject(new Error(`server exited: ${code}${serverError ? `\n${serverError}` : ""}`)));
-    });
-    browser = await chromium.launch({headless: true,
-        executablePath: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"});
-    const page = await browser.newPage({viewport: {width: 1100, height: 800}});
-    await page.goto(`http://127.0.0.1:${port}/roborally?room=timer-browser&player=one&name=One`);
-    await page.locator(".lobby-shell").waitFor();
+    await ready;
+    browser = await launchBrowser();
+    const {page} = await openUser(browser, {port, room: "timer-browser", name: "One", viewport: {width: 1100, height: 800}});
 
     await page.evaluate(() => ReactDOM.render(React.createElement(ProgrammingTimer, {state: {
         phase: "programming", playerNames: {two: "Игрок 2"}, programmingTimer: {userId: "two", remaining: 30}
@@ -84,5 +67,5 @@ server.stderr.on("data", (chunk) => serverError += String(chunk));
     process.exitCode = 1;
 }).finally(async () => {
     if (browser) await browser.close();
-    server.kill();
+    stopSandbox(server);
 });

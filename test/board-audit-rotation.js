@@ -2,7 +2,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const {createCanvas} = require(path.resolve(__dirname, "../../demo-server/node_modules/@napi-rs/canvas"));
+const {createCanvas} = require("@napi-rs/canvas");
 const {drawRotatedBoard} = require("../scripts/render-board-audit");
 
 const source = createCanvas(20,20), sourceContext = source.getContext("2d");

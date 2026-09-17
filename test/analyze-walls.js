@@ -1,7 +1,7 @@
 "use strict";
 
 const path = require("path");
-const {loadImage, createCanvas} = require(path.resolve(__dirname, "../../demo-server/node_modules/@napi-rs/canvas"));
+const {loadImage, createCanvas} = require("@napi-rs/canvas");
 const {BOARD_FEATURES} = require("../module");
 
 const boardName = process.argv[2] || "Vault";

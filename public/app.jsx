@@ -193,7 +193,7 @@ class BoardHints extends React.Component {
             title: `Стартовая позиция ${start.slot}`, description: "Исходная позиция робота с этим номером."}));
         (state.flags || []).filter((flag) => flag.x != null && flag.y != null).forEach((flag) => items.push({id: `flag-${flag.number}`, kind: "circle", x: flag.x + .5, y: flag.y + .5, r: .42,
             title: `Флаг ${flag.number}`, description: "Берётся по порядку; создаёт архив и ремонтирует после регистра 5. Фаза 8."}));
-        (state.robots || []).filter((robot) => robot.archive && !robot.eliminated).forEach((robot) => items.push({id: `archive-${robot.userId}`,
+        (state.robots || []).filter((robot) => robot.archive && robot.archive.x != null && robot.archive.y != null && !robot.eliminated).forEach((robot) => items.push({id: `archive-${robot.userId}`,
             kind: "corner", x: robot.archive.x + .096, y: robot.archive.y + .096, title: "Архивная точка",
             description: `Точка возрождения: ${state.playerNames[robot.userId] || robot.userId}${robot.userId === state.userId ? " (вы)" : ""}.`}));
         (state.robots || []).filter((robot) => robot.x != null && robot.y != null).forEach((robot) => items.push({id: `robot-${robot.userId}`,
@@ -1148,7 +1148,7 @@ class Game extends React.Component {
                                     style={{left: `${(flag.x + .5) / 12 * 100}%`, top: `${(flag.y + .5) / 16 * 100}%`}}>
                                     <span className="flag-cloth">{flag.number}</span><span className="flag-wrench"></span>
                                 </div>)}
-                                {state.robots.filter((robot) => robot.archive && !robot.eliminated).map((robot) => <div className="archive-marker"
+                                {state.robots.filter((robot) => robot.archive && robot.archive.x != null && robot.archive.y != null && !robot.eliminated).map((robot) => <div className="archive-marker"
                                     key={`archive-${robot.userId}`} style={{left: `${robot.archive.x / 12 * 100 + .8}%`, top: `${robot.archive.y / 16 * 100 + .6}%`, background: robot.color}}
                                     title={`Архив: ${state.playerNames[robot.userId]}`}>⚙</div>)}
                                 {state.phase === "reentry" && this.privateState.reentry && this.privateState.reentry.active ? this.privateState.reentry.candidates.map((candidate, index) =>

@@ -48,7 +48,7 @@ const START_LAYOUTS = {
     }
 };
 const COURSE_SPECIAL_RULES = {
-    "moving-targets": {description: "В каждой фазе регистра флаги движутся конвейерами как роботы. Упавший в яму флаг возвращается в исходную клетку в начале следующей фазы регистра.", status: "implemented", statusText: "Реализовано.", movingFlags: true},
+    "moving-targets": {description: "В каждой фазе регистра флаги движутся конвейерами как роботы, а сохранённые на них архивные метки следуют за флагами. Упавший в яму флаг возвращается в исходную клетку в начале следующей фазы регистра.", status: "implemented", statusText: "Реализовано.", movingFlags: true},
     "set-to-kill": {description: "Каждый лазер робота наносит 2 повреждения.", status: "implemented", statusText: "Реализовано.", robotLaserDamage: 2},
     "factory-rejects": {description: "Все роботы начинают с 2 повреждениями и не могут использовать Power Down.", status: "implemented", statusText: "Реализовано.", startingDamage: 2, disablePowerDown: true},
     "ball-lightning": {description: "На программирование каждого раунда всем игрокам даётся только 30 секунд; незаполненные регистры заполняются случайно.", status: "implemented", statusText: "Реализовано.", programmingSeconds: 30},
@@ -1232,13 +1232,37 @@ function init(wsServer, gamePath) {
                 if (!this.isInside(targetX, targetY)
                     || (targetY < BOARD_SIZE && this.features.pits.has(positionKey(targetX, targetY)))) {
                     this.addLog(`Флаг ${flag.number} падает в яму и вернётся в начале следующей фазы регистра.`);
+                    this.moveArchivesWithFlag(flag, null, null);
                     flag.x = null;
                     flag.y = null;
                     flag.offBoard = true;
                     return;
                 }
+                this.moveArchivesWithFlag(flag, targetX, targetY);
                 flag.x = targetX;
                 flag.y = targetY;
+            });
+        }
+
+        setRobotArchive(robot, flag = null) {
+            robot.archive = {x: robot.x, y: robot.y};
+            if (this.specialRules.movingFlags && flag)
+                robot.archive.movingFlagNumber = flag.number;
+        }
+
+        moveArchivesWithFlag(flag, x, y) {
+            if (!this.specialRules.movingFlags) return;
+            this.room.robots.forEach((robot) => {
+                const archive = robot.archive;
+                if (!archive) return;
+                // Rooms created before movingFlagNumber was introduced can
+                // still be recovered while the marker and flag coincide.
+                const followsFlag = archive.movingFlagNumber === flag.number
+                    || (archive.movingFlagNumber == null && archive.x === flag.x && archive.y === flag.y);
+                if (!followsFlag) return;
+                archive.movingFlagNumber = flag.number;
+                archive.x = x;
+                archive.y = y;
             });
         }
 
@@ -1247,6 +1271,7 @@ function init(wsServer, gamePath) {
             let restored = false;
             this.room.flags.forEach((flag) => {
                 if (!flag.offBoard) return;
+                this.moveArchivesWithFlag(flag, flag.homeX, flag.homeY);
                 flag.x = flag.homeX;
                 flag.y = flag.homeY;
                 flag.offBoard = false;
@@ -1333,7 +1358,7 @@ function init(wsServer, gamePath) {
                 const flag = this.room.flags.find((item) => item.x === robot.x && item.y === robot.y);
                 const previousArchive = robot.archive && `${robot.archive.x},${robot.archive.y}`;
                 if (flag) {
-                    robot.archive = {x: robot.x, y: robot.y};
+                    this.setRobotArchive(robot, flag);
                     if (flag.number === player.checkpointAvailable) {
                         player.checkpoints += 1;
                         player.checkpointAvailable = null;
@@ -1349,7 +1374,7 @@ function init(wsServer, gamePath) {
                     }
                 }
                 if (!flag && this.isOnFactory(robot) && this.features.repairs.has(this.boardKey(robot))) {
-                    robot.archive = {x: robot.x, y: robot.y};
+                    this.setRobotArchive(robot);
                     if (previousArchive !== `${robot.x},${robot.y}`)
                         this.addBoardEvent("archive", robot);
                 }
@@ -1369,7 +1394,8 @@ function init(wsServer, gamePath) {
                     const previousDamage = player.damage;
                     player.damage = Math.max(0, previousDamage - 1);
                     this.syncPoweredDownRegisters(player);
-                    robot.archive = {x: robot.x, y: robot.y};
+                    const flag = this.room.flags.find((item) => item.x === robot.x && item.y === robot.y);
+                    this.setRobotArchive(robot, flag || null);
                     this.addLog(`${this.room.playerNames[robot.userId]} обслуживает робота на ремонтной клетке.`);
                     if (player.damage < previousDamage) {
                         repaired += 1;

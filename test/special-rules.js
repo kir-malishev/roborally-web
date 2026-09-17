@@ -67,8 +67,8 @@ function gameWithCourse(id) {
     assert.equal(game.players.target.damage, 2);
 }
 
-// Moving Targets carries flags with both conveyor phases and restores a fallen
-// flag without changing archives or already earned checkpoint credit.
+// Moving Targets carries flags and their archive markers through both conveyor
+// phases, hides them while fallen, and restores both without changing credit.
 {
     const game = gameWithCourse("moving-targets");
     game.room.phase = "resolving";
@@ -84,13 +84,47 @@ function gameWithCourse(id) {
     Object.defineProperty(game, "features", {value: features});
     game.moveConveyors(true);
     assert.deepStrictEqual([game.room.flags[0].x, game.room.flags[0].y], [2, 1]);
+    assert.deepStrictEqual(game.room.robots[0].archive, {x: 2, y: 1, movingFlagNumber: 1},
+        "legacy archive marker did not attach to and follow its flag");
     game.moveConveyors(false);
     assert.equal(game.room.flags[0].offBoard, true);
     assert.equal(game.room.flags[0].x, null);
+    assert.deepStrictEqual(game.room.robots[0].archive, {x: null, y: null, movingFlagNumber: 1},
+        "archive marker remained on the board after its flag fell");
     assert(game.restoreMovingFlags());
     assert.deepStrictEqual([game.room.flags[0].x, game.room.flags[0].y], [1, 1]);
-    assert.deepStrictEqual(game.room.robots[0].archive, {x: 1, y: 1});
+    assert.deepStrictEqual(game.room.robots[0].archive, {x: 1, y: 1, movingFlagNumber: 1},
+        "archive marker did not return with its flag");
     assert.equal(game.players.one.checkpoints, 1);
+}
+
+// Saving on a moving flag records the association. Saving later on an
+// ordinary repair site replaces it with a stationary archive.
+{
+    const game = gameWithCourse("moving-targets");
+    game.room.phase = "resolving";
+    game.room.playerSlots = ["one"];
+    game.room.playerNames = {one: "One"};
+    game.players = {one: player("one")};
+    const robot = {userId: "one", x: 1, y: 1, direction: "north", archive: {x: 0, y: 12},
+        color: "#48f", eliminated: false, destroyed: false};
+    game.room.robots = [robot];
+    game.room.flags = [
+        {x: 1, y: 1, homeX: 1, homeY: 1, number: 1},
+        {x: 9, y: 9, homeX: 9, homeY: 9, number: 2}
+    ];
+    const features = {conveyors: {}, express: new Set(), walls: new Set(), pits: new Set(), repairs: new Set(["4,4"]),
+        gears: {}, pushers: [], lasers: [], conveyorTurns: {}};
+    Object.defineProperty(game, "features", {value: features});
+
+    game.touchCheckpoints();
+    assert.deepStrictEqual(robot.archive, {x: 1, y: 1, movingFlagNumber: 1},
+        "archive created on a moving flag was not associated with it");
+    robot.x = 4;
+    robot.y = 4;
+    game.touchCheckpoints();
+    assert.deepStrictEqual(robot.archive, {x: 4, y: 4},
+        "ordinary repair archive incorrectly remained attached to a flag");
 }
 
 // Ball Lightning starts its course timer immediately for every unfinished robot.

@@ -385,8 +385,9 @@ function PlayerPanel({state}) {
                 : status === "ready" ? "Игрок закончил программирование" : "";
             return <div className="player-row" key={userId}>
                 <i style={{background: robot.color}}></i>
-                <span className={`${userId === state.userId ? "own-player-name" : "player-name"} player-name-status ${status}`}
+                <div className="player-identity"><span className={`${userId === state.userId ? "own-player-name" : "player-name"} player-name-status ${status}`}
                     title={statusTitle || undefined}>{playerName(state, userId)}</span>
+                    <MemberHostControls state={state} userId={userId}/></div>
                 <span className="player-stat flags" title="Активированные флаги" aria-label={`Активированные флаги: ${stats.checkpoints || 0} из ${state.flags.length}`}>
                     <i aria-hidden="true">⚑</i><b>{stats.checkpoints || 0}/{state.flags.length}</b></span>
                 <span className="player-stat damage" title="Повреждения" aria-label={`Повреждения: ${stats.damage || 0}`}>
@@ -439,13 +440,16 @@ function GuidePhaseList({full = false}) {
     </ol>;
 }
 
-function QuickGuide({onOpen}) {
+function QuickGuide({onOpen, onOpenConveyors}) {
     return <section className="rr-panel quick-guide" aria-labelledby="quick-guide-title">
-        <div className="quick-guide-heading"><h2 id="quick-guide-title">Шпаргалка</h2>
-            <button type="button" className="quick-guide-open" onClick={onOpen}>Как играть</button></div>
-        <p className="quick-goal"><strong>Цель:</strong> активируйте все флаги строго по порядку.</p>
-        <GuidePhaseList/>
-        <p className="quick-repair">🔧 Ремонт на ключах и флагах — после пятого регистра.</p>
+        <div className="quick-guide-heading"><h2 id="quick-guide-title">Шпаргалка</h2><div className="quick-guide-actions">
+            <button type="button" className="conveyor-guide-open" onClick={onOpenConveyors}>КОНВЕЙЕРЫ</button>
+            <button type="button" className="quick-guide-open" onClick={onOpen}>Как играть</button></div></div>
+        <details className="rr-game-disclosure"><summary>Цель и порядок хода</summary>
+            <p className="quick-goal"><strong>Цель:</strong> активируйте все флаги строго по порядку.</p>
+            <GuidePhaseList/>
+            <p className="quick-repair">🔧 Ремонт на ключах и флагах — после пятого регистра.</p>
+        </details>
     </section>;
 }
 
@@ -579,14 +583,101 @@ function GamePauseControls({state, app}) {
     </section>;
 }
 
+function ConveyorDemoBoard({kind}) {
+    const floorId = `conveyor-floor-${kind}`;
+    const cells = [];
+    for (let row = 0; row < 3; row++) for (let column = 0; column < 4; column++)
+        cells.push(<rect key={`${column}-${row}`} x={50 + column * 80} y={30 + row * 80} width="80" height="80" fill={`url(#${floorId})`}/>);
+    const robotClass = kind === "belt" ? "conveyor-demo-good-robot" : "conveyor-demo-card-robot";
+    const initialFacing = kind === "belt" ? 0 : 90;
+    return <svg className="conveyor-demo-svg" viewBox="0 0 420 285" role="img"
+        aria-label={kind === "belt" ? "Конвейер привозит робота на поворот и разворачивает его на девяносто градусов"
+            : "Карта движения приводит робота на поворот, после чего конвейер перемещает его без разворота"}>
+        <defs><linearGradient id={floorId} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#7b8992"/><stop offset="1" stopColor="#56636c"/></linearGradient></defs>
+        <g className="conveyor-demo-floor">{cells}</g>
+        <g className="conveyor-demo-belt">
+            {[50,130].map((x) => <g key={x}><rect x={x + 2} y="32" width="76" height="76"/><path className="conveyor-demo-rollers" d={`M${x + 7} 38H${x + 73}M${x + 7} 102H${x + 73}`}/><path className="conveyor-demo-arrow" d={`M${x + 17} 61H${x + 43}V52L${x + 64} 70L${x + 43} 88V79H${x + 17}Z`}/></g>)}
+            <g><rect x="212" y="32" width="76" height="76"/><path className="conveyor-demo-rollers" d="M217 38H282M282 38V103"/>
+                <path className="conveyor-demo-arrow" d="M226 65H247Q268 65 268 86V91M258 88L268 100L278 88"/></g>
+            {[112,192].map((y) => <g key={y}><rect x="212" y={y} width="76" height="76"/><path className="conveyor-demo-rollers" d={`M218 ${y + 5}V${y + 71}M282 ${y + 5}V${y + 71}`}/><path className="conveyor-demo-arrow" d={`M241 ${y + 16}V${y + 42}H232L250 ${y + 63}L268 ${y + 42}H259V${y + 16}Z`}/></g>)}
+        </g>
+        <g className="conveyor-demo-program-card"><rect x="316" y="187" width="82" height="63" rx="8"/><text x="326" y="207">Вперёд 2</text><path d="M357 238V216M348 225L357 216L366 225"/></g>
+        <g className={robotClass} key={kind}><g className="conveyor-demo-robot" style={{"--rr-facing": `${initialFacing}deg`}}>
+            <circle r="25"/><circle className="inner" r="20"/><path d="M0-16L13 1H6V15H-6V1H-13Z"/></g></g>
+        {kind === "belt" ? <g className="conveyor-demo-turn-mark"><path d="M224 42A34 34 0 0 1 282 72"/><path d="M270 67L282 72L279 59"/></g>
+            : <g className="conveyor-demo-no-turn"><path d="M224 42A34 34 0 0 1 282 72"/><path d="M230 40L285 82"/></g>}
+    </svg>;
+}
+
+class ConveyorGuideModal extends React.Component {
+    constructor(props) {
+        super(props);
+        this.dialogRef = React.createRef();
+        this.handleKeyDown = this.handleKeyDown.bind(this);
+    }
+
+    componentDidUpdate(previousProps) {
+        if (this.props.open && !previousProps.open) {
+            this.returnFocus = this.props.returnFocus || document.activeElement;
+            this.previousOverflow = document.body.style.overflow;
+            document.body.style.overflow = "hidden";
+            document.addEventListener("keydown", this.handleKeyDown);
+            requestAnimationFrame(() => {
+                const close = this.dialogRef.current && this.dialogRef.current.querySelector(".guide-close");
+                if (close) close.focus();
+            });
+        } else if (!this.props.open && previousProps.open) this.releaseModal();
+    }
+
+    componentWillUnmount() { if (this.props.open) this.releaseModal(); }
+
+    releaseModal() {
+        document.removeEventListener("keydown", this.handleKeyDown);
+        document.body.style.overflow = this.previousOverflow || "";
+        if (this.returnFocus && document.contains(this.returnFocus)) this.returnFocus.focus();
+    }
+
+    handleKeyDown(event) {
+        if (event.key === "Escape") { event.preventDefault(); this.props.onClose(); return; }
+        if (event.key !== "Tab" || !this.dialogRef.current) return;
+        const focusable = [...this.dialogRef.current.querySelectorAll("button:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+        if (!focusable.length) return;
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+
+    render() {
+        if (!this.props.open) return null;
+        return <div className="guide-backdrop conveyor-guide-backdrop" onClick={(event) => event.target === event.currentTarget && this.props.onClose()}>
+            <section className="guide-modal conveyor-guide-modal" role="dialog" aria-modal="true" aria-labelledby="conveyor-guide-title" ref={this.dialogRef}>
+                <header className="guide-modal-header conveyor-guide-header"><div><h2 id="conveyor-guide-title">Как поворачивают конвейеры</h2></div>
+                    <button type="button" className="guide-close" aria-label="Закрыть подсказку о конвейерах" onClick={this.props.onClose}>×</button></header>
+                <div className="guide-modal-content conveyor-guide-content">
+                    <div className="conveyor-demo-grid">
+                        <article><div className="conveyor-demo-verdict yes">ДА, ПОВОРАЧИВАЕТСЯ</div><h3>Конвейер привёз робота на поворот</h3>
+                            <div className="conveyor-demo-stage"><ConveyorDemoBoard kind="belt"/></div>
+                            <p>Робот заезжает с соседней ленты и поворачивается на 90° вместе с ней.</p></article>
+                        <article><div className="conveyor-demo-verdict no">НЕТ, НЕ ПОВОРАЧИВАЕТСЯ</div><h3>Робот попал на поворот своей картой</h3>
+                            <div className="conveyor-demo-stage"><ConveyorDemoBoard kind="card"/></div>
+                            <p>Когда включится конвейер, робот поедет по стрелке, но продолжит смотреть туда же.</p></article>
+                    </div>
+                </div>
+            </section>
+        </div>;
+    }
+}
+
 function MemberHostControls({state, userId}) {
     const isHost = state.userId === state.hostId;
     if (!isHost || userId === state.userId) return null;
+    const isPlayer = state.playerSlots.includes(userId);
+    const removeLabel = isPlayer ? "Перевести в зрители" : "Удалить зрителя";
     return <span className="member-host-controls">
         {state.onlinePlayers.includes(userId) ? <button type="button" className="member-admin-button" title="Передать хоста" aria-label="Передать хоста"
-            onClick={(evt) => window.commonRoom.handleGiveHost(userId, evt)}><span className="material-icons" aria-hidden="true">vpn_key</span></button> : null}
-        <button type="button" className="member-admin-button" title="Удалить" aria-label="Удалить игрока"
-            onClick={(evt) => window.commonRoom.handleRemovePlayer(userId, evt)}><span className="material-icons" aria-hidden="true">delete_forever</span></button>
+            onClick={(evt) => window.commonRoom.handleGiveHost(userId, evt)}><i className="material-icons member-admin-glyph" aria-hidden="true">vpn_key</i></button> : null}
+        <button type="button" className="member-admin-button" title={removeLabel} aria-label={removeLabel}
+            onClick={(evt) => window.commonRoom.handleRemovePlayer(userId, evt)}><i className="material-icons member-admin-glyph" aria-hidden="true">{isPlayer ? "person_off" : "delete_forever"}</i></button>
     </span>;
 }
 
@@ -607,15 +698,21 @@ class Lobby extends React.Component {
             .map(colorFor));
         return <section className="lobby-shell lobby">
             <section className="lobby-intro rr-panel">
-                <div><h2>Лобби · комната {state.roomId}</h2>
-                    <p>Сначала вы находитесь среди зрителей. До начала партии роль можно менять свободно.</p></div>
-                <button type="button" className="lobby-guide-button" onClick={this.props.onOpenGuide}>Как играть</button>
-                <div className="role-actions">
-                    <button className={isPlayer ? "primary" : ""} disabled={isPlayer || playerCount >= 8}
-                        onClick={() => app.socket.emit("join-game")}>
-                        {isPlayer ? "Вы присоединились ✓" : "Присоединиться к игре"}</button>
-                    <button className={!isPlayer ? "primary" : ""} disabled={!isPlayer}
-                        onClick={() => app.socket.emit("spectators-join")}>Остаться зрителем</button>
+                <div className="lobby-intro-title"><div><h2>Лобби · {state.roomId}</h2>
+                    <p>{isPlayer ? "Вы участвуете в заезде" : "Вы смотрите за подготовкой"}</p></div>
+                    <button type="button" className="lobby-guide-button" onClick={this.props.onOpenGuide}>Как играть</button></div>
+                <div className="lobby-primary-actions"><div className="role-actions" aria-label="Роль в комнате">
+                        <button className={`lobby-role-button ${isPlayer ? "primary current-role" : ""}`} disabled={isPlayer || playerCount >= 8}
+                            onClick={() => app.socket.emit("join-game")}>
+                            {isPlayer ? "Вы в игре ✓" : "Присоединиться к игре"}</button>
+                        <button className={`lobby-role-button ${!isPlayer ? "primary current-role" : ""}`} disabled={!isPlayer}
+                            onClick={() => app.socket.emit("spectators-join")}>{isPlayer ? "Стать зрителем" : "Вы зритель"}</button>
+                    </div>
+                    <section className="lobby-start">
+                        {isHost ? <><button className="primary" disabled={!canStart} onClick={() => app.socket.emit("start-game")}>Начать игру</button>
+                            <p>{canStart ? "Курс и состав готовы" : `Нужно игроков: ${state.course.players}`}</p></>
+                            : <span className="lobby-start-placeholder">Игру начнёт хост</span>}
+                    </section>
                 </div>
             </section>
             <section className="lobby-members rr-panel">
@@ -644,11 +741,6 @@ class Lobby extends React.Component {
                 </div> : null}
             </section>
             <CourseSetup state={state} app={app} playerCount={playerCount} readOnly={!isHost}/>
-            <section className="lobby-start rr-panel">
-                {isHost ? <><button className="primary" disabled={!canStart} onClick={() => app.socket.emit("start-game")}>Начать игру</button>
-                    {!canStart ? <p>Для курса «{state.course.name}» требуется игроков: {state.course.players}.</p> : <p>Курс и состав готовы.</p>}</>
-                    : <p>Хост начнёт игру, когда на выбранном курсе будет достаточно игроков.</p>}
-            </section>
         </section>;
     }
 }
@@ -688,7 +780,13 @@ class CourseSetup extends React.Component {
     constructor(props) {
         super(props);
         this.state = {board: props.state.course.board, start: props.state.course.start, rotation: props.state.course.rotation || 0,
-            name: "Мой курс", flags: [[2,2], [9,5], [5,9]], flagHistory: [], selectedPreviewOpen: true};
+            name: "Мой курс", flags: [[2,2], [9,5], [5,9]], flagHistory: [], inspectedCourseId: props.state.course.id,
+            courseQuery: "", fitOnly: false, catalogOpen: true};
+    }
+
+    componentDidUpdate(previousProps) {
+        if (previousProps.state.course.id !== this.props.state.course.id)
+            this.setState({inspectedCourseId: this.props.state.course.id});
     }
 
     saveCustom() {
@@ -718,37 +816,69 @@ class CourseSetup extends React.Component {
         const {state, app, playerCount, readOnly} = this.props;
         const selected = state.course.id;
         const previewFlags = this.state.flags;
+        const normalizedQuery = this.state.courseQuery.trim().toLocaleLowerCase("ru");
+        const visibleCourses = state.courses.filter((course) => {
+            const fits = playerCount >= course.min && playerCount <= course.max;
+            const matches = !normalizedQuery || `${course.name} ${course.board} ${course.level}`.toLocaleLowerCase("ru").includes(normalizedQuery);
+            return matches && (!this.state.fitOnly || fits);
+        });
+        const inspectedCourse = state.courses.find((course) => course.id === this.state.inspectedCourseId) || state.course;
+        const inspectedIsSelected = inspectedCourse.id === selected;
         return <section className="course-setup rr-panel">
-            <div className="course-heading"><div><h3>Готовые курсы</h3><p>Игроков сейчас: {playerCount}. Подходящие курсы отмечены зелёной меткой.</p></div>
-                {readOnly ? <span>Выбирает хост</span> : <span>Выберите курс</span>}</div>
-            <div className="course-list">{state.courses.map((course) => <button key={course.id}
-                className={`course-card ${selected === course.id ? "selected" : ""} ${playerCount >= course.min && playerCount <= course.max ? "recommended" : ""}`}
-                disabled={readOnly} aria-pressed={selected === course.id}
-                onClick={() => !readOnly && app.socket.emit("select-course", course.id)}>
-                <CourseThumbnail course={course} state={state}/>
-                <span className="course-card-copy"><strong>{course.name}</strong><span>{course.board} · {course.length}</span><small>Игроки: {course.players} · {course.level}</small>
-                    {course.specialRules ? <span className="special-rule-marker">Special Rules
-                        <span className="special-rule-tooltip">{course.specialRules.description}</span>
-                    </span> : null}
-                    <b className={`course-fit ${playerCount >= course.min && playerCount <= course.max ? "fits" : "not-fit"}`}>
-                        {playerCount >= course.min && playerCount <= course.max ? "Подходит для состава" : `Нужно игроков: ${course.players}`}</b></span>
-            </button>)}</div>
-            <section className={`selected-course-preview ${this.state.selectedPreviewOpen ? "expanded" : "collapsed"}`}>
-                <div className="selected-course-heading"><div><strong>Выбранный курс: {state.course.name}</strong>
-                    <span>{state.course.board} · игроков: {state.course.players}</span></div>
-                    <span className="selected-course-actions">
-                        {!readOnly && playerCount > 1 ? <button type="button" onClick={() => app.socket.emit("shuffle-starts")}>Перемешать старты</button> : null}
-                        <button type="button" onClick={() => this.setState({selectedPreviewOpen: !this.state.selectedPreviewOpen})}>
-                            {this.state.selectedPreviewOpen ? "Свернуть" : "Показать поле"}</button>
-                    </span></div>
-                {this.state.selectedPreviewOpen ? <div className={`selected-course-body ${state.course.specialRules ? "has-special-rules" : ""}`}>
-                    <div className="large-course-preview"><CourseFieldContents course={state.course} state={state} flagClassName="large-preview-flag" showLobbyRobots/></div>
-                    {state.course.specialRules ? <div className="selected-course-special-rules">
-                        <strong>Special Rules</strong><p>{state.course.specialRules.description}</p>
-                    </div> : null}
-                </div> : null}
-            </section>
-            {!readOnly ? <details className="constructor"><summary>Конструктор своего курса</summary>
+            <div className="selected-course-strip"><div><small>Выбран для игры</small><strong>{state.course.name}</strong>
+                    <span>{state.course.board} · {state.course.players} игроков · {state.course.length}</span></div>
+                <span className="selected-course-actions">
+                    {!inspectedIsSelected ? <button type="button" onClick={() => this.setState({inspectedCourseId: selected})}>Показать выбранный</button> : null}
+                    {!readOnly && playerCount > 1 ? <button type="button" onClick={() => app.socket.emit("shuffle-starts")}>Перемешать старты</button> : null}
+                    {readOnly ? <em>Курс выбирает хост</em> : null}
+                </span></div>
+            <details className="lobby-fold course-browser" open={this.state.catalogOpen}
+                onToggle={(event) => this.setState({catalogOpen: event.currentTarget.open})}>
+                <summary><span>Готовые курсы <small>{state.courses.length}</small></span><em>{this.state.catalogOpen ? "Свернуть" : "Открыть каталог"}</em></summary>
+                <div className="course-browser-tools">
+                    <label className="course-search"><span>Поиск</span><input type="search" value={this.state.courseQuery} placeholder="Название, поле или сложность"
+                        onChange={(event) => this.setState({courseQuery: event.target.value})}/></label>
+                    <label className="course-fit-filter"><input type="checkbox" checked={this.state.fitOnly}
+                        onChange={(event) => this.setState({fitOnly: event.target.checked})}/><span>Только для {playerCount} игроков</span></label>
+                </div>
+                <div className="course-browser-layout">
+                    <div className="course-list" role="listbox" aria-label="Готовые курсы">{visibleCourses.map((course) => {
+                        const fits = playerCount >= course.min && playerCount <= course.max;
+                        return <button key={course.id} type="button" role="option" aria-selected={inspectedCourse.id === course.id}
+                            className={`course-card ${selected === course.id ? "selected" : ""} ${inspectedCourse.id === course.id ? "inspected" : ""} ${fits ? "recommended" : ""}`}
+                            onClick={() => {
+                                this.setState({inspectedCourseId: course.id});
+                                if (!readOnly && selected !== course.id) app.socket.emit("select-course", course.id);
+                            }}>
+                            <CourseThumbnail course={course} state={state}/>
+                            <span className="course-card-copy"><strong>{course.name}</strong><span>{course.board} · {course.length}</span>
+                                <small>{course.players} игроков · {course.level}</small>
+                                <span className="course-card-badges">{selected === course.id ? <b className="course-selected-badge">Выбран</b> : null}
+                                    <b className={`course-fit ${fits ? "fits" : "not-fit"}`}>{fits ? "Подходит" : course.players}</b>
+                                    {course.specialRules ? <span className="special-rule-marker" title={course.specialRules.description}>Special Rules
+                                        <span className="special-rule-tooltip">{course.specialRules.description}</span>
+                                    </span> : null}</span></span>
+                        </button>;
+                    })}{!visibleCourses.length ? <p className="course-empty">Курсы по этому фильтру не найдены.</p> : null}</div>
+                    <section className="selected-course-preview" aria-live="polite">
+                        <div className="selected-course-heading"><div><small>Просмотр курса</small><strong>{inspectedCourse.name}</strong>
+                            <span>{inspectedCourse.board} · {inspectedCourse.players} игроков · {inspectedCourse.level}</span></div></div>
+                        <div className={`selected-course-body ${inspectedCourse.specialRules ? "has-special-rules" : ""}`}>
+                            <div className="large-course-preview"><CourseFieldContents course={inspectedCourse} state={state}
+                                flagClassName="large-preview-flag" showLobbyRobots={inspectedIsSelected}/></div>
+                            {inspectedCourse.specialRules ? <div className="selected-course-special-rules">
+                                <strong>Special Rules</strong><p>{inspectedCourse.specialRules.description}</p>
+                            </div> : null}
+                        </div>
+                        <div className="course-inspector-actions">
+                            {inspectedIsSelected ? <strong className="course-current-note">✓ Выбран для игры</strong>
+                                : readOnly ? <span>Можно осмотреть любой курс. Выбор изменяет хост.</span>
+                                : <button type="button" className="primary" onClick={() => app.socket.emit("select-course", inspectedCourse.id)}>Выбрать этот курс</button>}
+                        </div>
+                    </section>
+                </div>
+            </details>
+            {!readOnly ? <details className="constructor"><summary><span>Конструктор своего курса</span><em>Создать курс</em></summary>
                 <div className="constructor-fields">
                     <label>Название<input value={this.state.name} onChange={(event) => this.setState({name: event.target.value})}/></label>
                     <label>Карта<select value={this.state.board} onChange={(event) => this.setState({board: event.target.value})}>{Object.keys(state.boardCards).map((board) => <option key={board}>{board}</option>)}</select></label>
@@ -819,6 +949,40 @@ function ProgrammingTimer({state}) {
         <div><strong>{timer.paused ? "Таймер приостановлен" : timer.global ? "Особый таймер курса" : "Последний игрок программирует"}</strong>
             <small>{timer.paused ? "Отсчёт продолжится после снятия паузы." : `${pendingNames}: после сигнала пустые регистры заполнятся случайно.`}</small></div>
     </section>;
+}
+
+function bottomDockProgrammingState(state, isPlayer) {
+    if (!isPlayer || state.phase !== "programming") return {className: "", label: null};
+    if (state.programmingAutoFill) return {
+        className: "rr-dock-programming rr-dock-expired",
+        label: "ВРЕМЯ ВЫШЛО · РЕГИСТРЫ ЗАПОЛНЕНЫ"
+    };
+    const timer = state.programmingTimer;
+    if (!timer) return state.paused ? {
+        className: "rr-dock-programming rr-dock-paused",
+        label: "ПРОГРАММИРОВАНИЕ НА ПАУЗЕ"
+    } : {
+        className: "rr-dock-programming",
+        label: `ПРОГРАММИРОВАНИЕ · РАУНД ${state.round}`
+    };
+    const remaining = Math.max(0, Number(timer.remaining) || 0);
+    if (timer.paused || state.paused) return {
+        className: "rr-dock-programming rr-dock-timer rr-dock-paused",
+        label: "ТАЙМЕР НА ПАУЗЕ"
+    };
+    const warning = remaining <= 10 ? " rr-dock-warning" : "";
+    if (timer.global) return {
+        className: `rr-dock-programming rr-dock-timer${warning}`,
+        label: `ОСОБЫЙ ТАЙМЕР · ${remaining} СЕКУНД`
+    };
+    const targetIds = timer.userIds || [timer.userId];
+    const isTarget = targetIds.includes(state.userId);
+    return {
+        className: `rr-dock-programming rr-dock-timer${warning}`,
+        label: isTarget
+            ? `ВАШИ ${remaining} СЕКУНД`
+            : `${remaining} СЕКУНД · ${targetIds.map((userId) => playerName(state, userId)).join(", ")}`
+    };
 }
 
 function Program({state, privateState, app}) {
@@ -1011,10 +1175,13 @@ class Game extends React.Component {
         const boardHintsEnabled = localStorage.getItem("roborally-board-hints") !== "false";
         this.state = {inited: false, phase: "loading", playerNames: {}, playerSlots: [], robots: [], log: [], flags: [],
             boardScale, boardPanX: 0, boardPanY: 0, boardPanMode: false, boardHintsEnabled,
-            hudCollapsed: false, bottomDockCollapsed: false, guideOpen: false};
+            hudCollapsed: window.innerWidth <= 760, bottomDockCollapsed: false, guideOpen: false, conveyorGuideOpen: false,
+            programmingCueActive: false, timerCueActive: false};
         this.privateState = {hand: [], selected: [], locked: false};
         this.openGuide = this.openGuide.bind(this);
         this.closeGuide = this.closeGuide.bind(this);
+        this.openConveyorGuide = this.openConveyorGuide.bind(this);
+        this.closeConveyorGuide = this.closeConveyorGuide.bind(this);
     }
 
     openGuide(event) {
@@ -1024,6 +1191,15 @@ class Game extends React.Component {
 
     closeGuide() {
         this.setState({guideOpen: false});
+    }
+
+    openConveyorGuide(event) {
+        this.conveyorGuideReturnFocus = event && event.currentTarget ? event.currentTarget : document.activeElement;
+        this.setState({conveyorGuideOpen: true});
+    }
+
+    closeConveyorGuide() {
+        this.setState({conveyorGuideOpen: false});
     }
 
     setBoardScale(boardScale) {
@@ -1087,7 +1263,39 @@ class Game extends React.Component {
                 largeImageKey: "roborally",
                 details: "RoboRally"
             }, this);
-            this.setState({...state, userId: this.userId, inited: true});
+            const isPlayer = (state.playerSlots || []).includes(this.userId);
+            const isProgrammingPlayer = isPlayer && state.phase === "programming";
+            const programmingCueKey = isProgrammingPlayer ? String(state.round) : null;
+            const timerCueKey = isProgrammingPlayer && state.programmingTimer
+                ? `${state.round}:${state.programmingTimer.global ? "global" : "last"}` : null;
+            const localState = {};
+            if (!programmingCueKey) {
+                this.lastProgrammingCueKey = null;
+                localState.programmingCueActive = false;
+                clearTimeout(this.programmingCueTimeout);
+            } else if (programmingCueKey !== this.lastProgrammingCueKey) {
+                this.lastProgrammingCueKey = programmingCueKey;
+                localState.programmingCueActive = true;
+                clearTimeout(this.programmingCueTimeout);
+                this.programmingCueTimeout = setTimeout(() => this.setState({programmingCueActive: false}), 1300);
+            }
+            if (!timerCueKey) {
+                this.lastTimerCueKey = null;
+                localState.timerCueActive = false;
+                clearTimeout(this.timerCueTimeout);
+            } else if (timerCueKey !== this.lastTimerCueKey) {
+                this.lastTimerCueKey = timerCueKey;
+                localState.timerCueActive = true;
+                clearTimeout(this.timerCueTimeout);
+                this.timerCueTimeout = setTimeout(() => this.setState({timerCueActive: false}), 1600);
+            }
+            if (isProgrammingPlayer) {
+                const timer = state.programmingTimer;
+                document.title = timer
+                    ? (timer.paused || state.paused ? "Таймер на паузе · RoboRally" : `${Math.max(0, Number(timer.remaining) || 0)} сек · RoboRally`)
+                    : "Программирование · RoboRally";
+            } else document.title = "RoboRally";
+            this.setState({...state, ...localState, userId: this.userId, inited: true});
         });
         this.socket.on("player-state", (playerState) => {
             this.privateState = playerState;
@@ -1098,24 +1306,32 @@ class Game extends React.Component {
         this.socket.emit("init", initArgs);
     }
 
+    componentWillUnmount() {
+        clearTimeout(this.programmingCueTimeout);
+        clearTimeout(this.timerCueTimeout);
+        document.title = "RoboRally";
+    }
+
     render() {
         const state = this.state;
         if (!state.inited) return <main className="loading">Подключение к цеху RoboRally…</main>;
         const isPlayer = state.playerSlots.includes(state.userId);
         const showBottomDock = (state.phase === "programming" && isPlayer) || state.phase === "power-down-choice" || state.phase === "reentry"
             || state.phase === "resolving" || state.phase === "finished";
+        const dockProgramming = bottomDockProgrammingState(state, isPlayer);
+        const dockCueClasses = `${state.programmingCueActive ? " rr-phase-cue-active" : ""}${state.timerCueActive ? " rr-timer-cue-active" : ""}`;
         return <React.Fragment>
         <CommonRoom state={state} app={this}/>
         <HostControls app={this} data={state} timerControls={[]}
             emitEvent={(...args) => this.socket.emit(...args)}/>
-        <main className="roborally-app">
+        <main className={`roborally-app ${state.phase !== "lobby" ? "rr-playing" : ""}`}>
             <header>
                 <div><h1>RoboRally</h1><p>Комната {state.roomId} · {state.phase === "programming" ? "программирование" : state.phase === "resolving" ? "исполнение" : state.phase === "power-down-choice" ? "решение Power Down" : state.phase === "reentry" ? "возрождение" : state.phase === "finished" ? "финиш" : "лобби"}</p></div>
                 {state.userId === state.hostId && state.phase !== "lobby" ? <button onClick={() => this.socket.emit("restart-game")}>В лобби</button> : null}
             </header>
             {state.phase === "lobby" ? <Lobby state={state} app={this} onOpenGuide={this.openGuide}/> : <div className={`game-screen ${state.paused ? "is-paused" : ""}`}>
                 {state.paused ? <section className="pause-banner" role="status"><strong>Игра на паузе</strong><span>Хост может продолжить игру из панели управления.</span></section> : null}
-                <ProgrammingTimer state={state}/>
+                {!isPlayer ? <ProgrammingTimer state={state}/> : null}
                 <section className="game-layout">
                     <div className="board-column">
                         <div className={`board-viewport ${state.boardPanMode ? "pan-enabled" : ""} ${state.boardPanning ? "panning" : ""}`}
@@ -1151,14 +1367,20 @@ class Game extends React.Component {
                         </div>
                     </div>
                     <aside className={`game-side-hud ${state.hudCollapsed ? "collapsed" : ""}`}>
-                        <div className="dock-title"><strong>Информация</strong><button type="button" title={state.hudCollapsed ? "Показать панели" : "Свернуть панели"}
+                        <div className="dock-title"><strong>{state.hudCollapsed ? "Роботы и поле" : `Раунд ${state.round}`}</strong><button type="button" aria-expanded={!state.hudCollapsed} title={state.hudCollapsed ? "Показать панели" : "Свернуть панели"}
                             onClick={() => this.setState({hudCollapsed: !state.hudCollapsed})}>{state.hudCollapsed ? "◀" : "▶"}</button></div>
                         <div className="dock-scroll">
                         <PlayerPanel state={state}/>
-                        <CourseSpecialRules course={state.course}/>
-                        <QuickGuide onOpen={this.openGuide}/>
-                        <section className="rr-panel log"><h2>Системный журнал</h2>{state.log.map((item, index) => <p key={index}>{item}</p>)}</section>
+                        {state.course.specialRules ? <details className="rr-game-disclosure rr-course-rules"><summary>Особые правила · {state.course.name}</summary>
+                            <CourseSpecialRules course={state.course}/>
+                        </details> : null}
+                        <QuickGuide onOpen={this.openGuide} onOpenConveyors={this.openConveyorGuide}/>
+                        <details className="rr-game-disclosure rr-game-journal"><summary>Системный журнал</summary>
+                            <section className="rr-panel log" aria-label="Системный журнал">{state.log.map((item, index) => <p key={index}>{item}</p>)}</section>
+                        </details>
                         <GamePauseControls state={state} app={this}/>
+                        </div>
+                        <div className="rr-hud-footer">
                         <div className="board-toolbar rr-panel" aria-label="Масштаб игрового поля">
                             <button type="button" title="Уменьшить поле" aria-label="Уменьшить поле"
                                 disabled={state.boardScale <= 30} onClick={() => this.setBoardScale(state.boardScale - 10)}>−</button>
@@ -1180,14 +1402,18 @@ class Game extends React.Component {
                                     this.setState({boardHintsEnabled: enabled});
                                 }}>?</button>
                         </div>
-                        {state.phase === "resolving" ? <section className="rr-panel stage"><h2>Сейчас</h2><p>{state.stage}</p></section> : null}
+                        <section className="rr-panel stage" role="status"><h2>{state.phase === "resolving" ? `Регистр ${state.register} / 5` : "Сейчас"}</h2>
+                            <p>{state.paused ? "Игра на паузе" : state.phase === "resolving" ? state.stage : state.phase === "programming" ? "Выбор программы" : state.phase === "reentry" ? "Возрождение роботов" : state.phase === "power-down-choice" ? "Решение Power Down" : "Заезд завершён"}</p></section>
                         </div>
                     </aside>
                 </section>
-                {showBottomDock ? <section className={`bottom-dock ${state.bottomDockCollapsed ? "collapsed" : ""}`}>
+                {showBottomDock ? <section className={`bottom-dock ${state.bottomDockCollapsed ? "collapsed" : ""} ${dockProgramming.className}${dockCueClasses}`}>
                     <button className="bottom-dock-toggle" type="button" onClick={() => this.setState({bottomDockCollapsed: !state.bottomDockCollapsed})}
                         title={state.bottomDockCollapsed ? "Показать игровую панель" : "Свернуть игровую панель"}>
-                        {state.bottomDockCollapsed ? "Показать игровую панель ▲" : "Свернуть ▼"}
+                        <span className="rr-dock-status-text" role="status" aria-live="polite">
+                            {dockProgramming.label || (state.bottomDockCollapsed ? "Показать игровую панель" : "Свернуть")}
+                        </span>
+                        <span className="rr-dock-chevron" aria-hidden="true">{state.bottomDockCollapsed ? "▲" : "▼"}</span>
                     </button>
                     <div className="bottom-dock-scroll">
                         <Program state={state} privateState={this.privateState} app={this}/>
@@ -1201,6 +1427,7 @@ class Game extends React.Component {
                 </section> : null}
             </div>}
             <GuideModal open={state.guideOpen} onClose={this.closeGuide} returnFocus={this.guideReturnFocus}/>
+            <ConveyorGuideModal open={state.conveyorGuideOpen} onClose={this.closeConveyorGuide} returnFocus={this.conveyorGuideReturnFocus}/>
         </main>
         </React.Fragment>;
     }

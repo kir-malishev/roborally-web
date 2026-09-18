@@ -72,6 +72,12 @@ async function renderProgram(page, overrides = {}) {
     assert(await fixedChoice.evaluate((element) => element.classList.contains("confirmed")), "fixed continuation has no confirmation state");
     assert.equal(await page.getByText("Ваш выбор принят", {exact: true}).count(), 1);
 
+    const postChoiceDock = await page.evaluate(() => bottomDockProgrammingState({
+        phase: "programming", round: 4, userId: "one", playerSlots: ["one"]
+    }, true));
+    assert.equal(postChoiceDock.label, "ПРОГРАММИРОВАНИЕ · РАУНД 4",
+        "programming is not visibly announced after the Power Down choice phase");
+
     await page.evaluate(() => {
         const lockedCard = {id: "locked", priority: 420, type: "right", label: "Поворот вправо"};
         const state = {phase: "programming", userId: "viewer", playerSlots: ["one"], playerNames: {one: "One"},

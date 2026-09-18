@@ -463,13 +463,13 @@ function init(wsServer, gamePath) {
                 }])),
                 onlinePlayers: [...this.room.onlinePlayers],
                 spectators: [...this.room.spectators],
-                robots: this.room.robots.map((robot) => ({...robot})),
+                robots: this.room.robots.filter((robot) => !robot.withdrawn).map((robot) => ({...robot})),
                 log: this.room.log.slice(-12)
             };
         }
 
         privateState(userId) {
-            const player = this.players[userId];
+            const player = this.room.playerSlots.includes(userId) ? this.players[userId] : null;
             const powerDownDisabled = !!this.specialRules.disablePowerDown;
             return player ? {
                 hand: player.hand,
@@ -573,16 +573,60 @@ function init(wsServer, gamePath) {
             const playerName = this.playerName(playerId);
             const slot = this.room.playerSlots.indexOf(playerId);
             if (slot >= 0) {
-                if (this.room.phase !== "lobby")
-                    return this.userRegistry.send(this.room.hostId, "message", "Игрока нельзя удалить во время партии: сначала верните игру в лобби.");
+                if (playerId === this.room.hostId)
+                    return this.userRegistry.send(this.room.hostId, "message", "Сначала передайте роль хоста другому участнику.");
                 this.room.playerSlots[slot] = null;
-                delete this.room.playerColors[playerId];
-                this.randomizeStartAssignments();
-                if (this.room.onlinePlayers.has(playerId))
-                    this.room.spectators.add(playerId);
-                else
-                    delete this.room.playerNames[playerId];
-                this.addLog(`${playerName} удалён из игры хостом.`);
+                this.room.spectators.add(playerId);
+                if (this.room.phase === "lobby") {
+                    delete this.room.playerColors[playerId];
+                    this.randomizeStartAssignments();
+                    this.addLog(`${playerName} переведён хостом в зрители.`);
+                } else {
+                    const robot = this.getRobot(playerId);
+                    if (robot) {
+                        robot.eliminated = true;
+                        robot.destroyed = false;
+                        robot.withdrawn = true;
+                        delete robot.death;
+                    }
+                    this.addLog(`${playerName} переведён хостом в зрители и больше не участвует в заезде.`);
+                    this.powerDownChoiceUsers = (this.powerDownChoiceUsers || []).filter((id) => id !== playerId);
+                    if (this.powerDownChoices) this.powerDownChoices.delete(playerId);
+                    if (Array.isArray(this.room.reentryQueue))
+                        this.room.reentryQueue = this.room.reentryQueue.filter((id) => id !== playerId);
+                    const wasResolving = this.room.phase === "resolving";
+                    if (this.checkLastRobotStanding()) {
+                        this.cancelProgrammingTimer();
+                        this.cancelAutoFillResolution();
+                        if (!wasResolving)
+                            this.addLog(`${this.playerName(this.room.winnerId)} остался единственным роботом с жизнями и победил!`);
+                        return this.update();
+                    }
+                    if (this.room.phase === "power-down-choice")
+                        return this.completePowerDownChoice();
+                    if (this.room.phase === "reentry" && this.room.reentryUserId === playerId) {
+                        this.room.reentryUserId = this.room.reentryQueue[0] || null;
+                        if (this.room.reentryUserId) {
+                            this.addLog(`${this.playerName(this.room.reentryUserId)} выбирает возрождение.`);
+                            return this.update();
+                        }
+                        this.room.reentryQueue = [];
+                        return this.startRound();
+                    }
+                    if (this.room.phase === "programming") {
+                        this.cancelProgrammingTimer();
+                        if (this.areAllProgramsLocked()) {
+                            this.update();
+                            this.resolveRound().catch((error) => {
+                                this.addLog(`Ошибка разрешения хода: ${error.message}`);
+                                this.room.phase = "programming";
+                                this.update();
+                            });
+                            return;
+                        }
+                        this.maybeStartProgrammingTimer();
+                    }
+                }
             } else if (this.room.spectators.has(playerId)) {
                 this.room.spectators.delete(playerId);
                 delete this.room.playerNames[playerId];
@@ -921,6 +965,11 @@ function init(wsServer, gamePath) {
                 || this.powerDownChoices.has(userId))
                 return;
             this.powerDownChoices.set(userId, enabled);
+            return this.completePowerDownChoice();
+        }
+
+        completePowerDownChoice() {
+            if (this.room.phase !== "power-down-choice") return false;
             this.room.powerDownChoice = {answered: this.powerDownChoices.size, total: this.powerDownChoiceUsers.length};
             if (this.powerDownChoices.size < this.powerDownChoiceUsers.length)
                 return this.update();
@@ -937,6 +986,7 @@ function init(wsServer, gamePath) {
             this.room.powerDownChoice = null;
             if (!this.prepareReentry())
                 this.startRound();
+            return true;
         }
 
         advanceToNextRound() {

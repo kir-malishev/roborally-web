@@ -309,12 +309,12 @@ function BoardEventIcon({event}) {
     </svg>;
 }
 
-function BoardEvents({events = []}) {
+function BoardEvents({events = [], replayKey = "live"}) {
     if (!events.length) return null;
     return <div className="board-events-layer" aria-hidden="true">{events.map((event) => {
         const [dx,dy] = FIELD_VECTORS[event.direction] || [0,0];
         return <span className={`board-event board-event-${event.type} ${event.turn > 0 ? "turn-right" : event.turn < 0 ? "turn-left" : ""}`}
-            key={event.id} data-event-id={event.id} data-user-id={event.userId}
+            key={`${replayKey}-${event.id}`} data-event-id={event.id} data-user-id={event.userId}
             style={{left: `${(event.x + .5) / 12 * 100}%`, top: `${(event.y + .5) / 16 * 100}%`,
                 "--event-color": event.color || "#8ddcff", "--event-dx": `${-dx * 2.2}cqw`, "--event-dy": `${-dy * 2.2}cqw`}}>
             <BoardEventIcon event={event}/>
@@ -322,7 +322,7 @@ function BoardEvents({events = []}) {
     })}</div>;
 }
 
-function LaserEffects({shots = [], robots = []}) {
+function LaserEffects({shots = [], robots = [], replayKey = "live"}) {
     if (!shots.length) return null;
     const robotsByUser = Object.fromEntries(robots.map((robot) => [robot.userId, robot]));
     // A robot beam is valid only while its real source robot occupies the
@@ -352,7 +352,7 @@ function LaserEffects({shots = [], robots = []}) {
     };
     return <svg className="laser-effects" viewBox="0 0 12 16" preserveAspectRatio="none" aria-hidden="true">
         {visibleShots.map((shot) => {
-            return <g className={`laser-shot laser-shot-${shot.source}`} data-source-user-id={shot.sourceUserId || undefined} key={shot.id}>
+            return <g className={`laser-shot laser-shot-${shot.source}`} data-source-user-id={shot.sourceUserId || undefined} key={`${replayKey}-${shot.id}`}>
                 {beamLines(shot).map((line, index) => <React.Fragment key={index}>
                     <line className="laser-beam-glow" pathLength="1" {...line}/>
                     <line className="laser-beam-core" pathLength="1" {...line}/>
@@ -360,7 +360,7 @@ function LaserEffects({shots = [], robots = []}) {
                 <circle className="laser-muzzle" cx={shot.start.x} cy={shot.start.y} r=".16"/>
             </g>;
         })}
-        {[...hits.entries()].map(([userId, hit]) => <g className="laser-impact" key={userId}
+        {[...hits.entries()].map(([userId, hit]) => <g className="laser-impact" key={`${replayKey}-${userId}`}
             style={{"--impact-color": (robotsByUser[userId] || {}).color || "#ffcf4a"}}>
             <circle className="laser-impact-ring" cx={hit.x} cy={hit.y} r=".38"/>
             <circle className="laser-impact-flash" cx={hit.x} cy={hit.y} r=".2"/>
@@ -372,11 +372,13 @@ function LaserEffects({shots = [], robots = []}) {
 function PlayerPanel({state}) {
     const robotsByUser = {};
     state.robots.forEach((robot) => robotsByUser[robot.userId] = robot);
+    const displayedStats = state.historyReview && !state.historyReview.actual
+        && state.historyReview.playerStats ? state.historyReview.playerStats : state.playerStats;
     return <section className="players-panel rr-panel">
         <h2>Роботы</h2>
         {state.playerSlots.filter(Boolean).map((userId) => {
             const robot = robotsByUser[userId] || {};
-            const stats = (state.playerStats && state.playerStats[userId]) || {};
+            const stats = (displayedStats && displayedStats[userId]) || {};
             const status = stats.poweredDown ? "powered-down"
                 : stats.powerDownNextRound ? "power-down-next"
                 : state.phase === "programming" && stats.ready ? "ready" : "";
@@ -569,6 +571,59 @@ function CourseSpecialRules({course}) {
     if (!course || !course.specialRules) return null;
     return <section className="rr-panel active-special-rules"><h2>Special Rules · {course.name}</h2>
         <p>{course.specialRules.description}</p></section>;
+}
+
+function PauseBanner({state}) {
+    if (!state.paused) return null;
+    const review = state.historyReview || {};
+    if (review.playing) return <section className="pause-banner history" role="status">
+        <strong>Игра на паузе · Воспроизведение журнала</strong>
+        <span>{review.selected ? `Раунд ${review.selected.round} · регистр ${review.selected.register} · ${review.stage || "выполнение"}` : "Подготовка воспроизведения"}</span>
+    </section>;
+    if (!review.actual && review.selected) return <section className="pause-banner history" role="status">
+        <strong>Игра на паузе · Просмотр журнала</strong>
+        <span>{`Раунд ${review.selected.round} · ${review.frameIndex === 0 ? "перед" : "стадия"} регистра ${review.selected.register}${review.stage ? ` · ${review.stage}` : ""}`}</span>
+    </section>;
+    return <section className="pause-banner" role="status">
+        <strong>Игра на паузе · Актуальное состояние</strong><span>Хост может открыть журнал выполненных регистров.</span>
+    </section>;
+}
+
+function HistoryReviewPanel({state, app}) {
+    if (!state.paused) return null;
+    const review = state.historyReview || {entries: [], selected: null, actual: true, playing: false};
+    const entries = review.entries || [];
+    const isHost = state.userId === state.hostId;
+    const rounds = [...new Set(entries.map((entry) => entry.round))].sort((left, right) => right - left);
+    const selected = review.selected;
+    const select = (entry) => app.socket.emit("select-history-register", {round: entry.round, register: entry.register});
+    return <section className={`rr-panel history-review-panel ${review.actual ? "actual" : "reviewing"} ${review.playing ? "playing" : ""}`}
+        aria-label="Журнал выполненных регистров">
+        <div className="history-review-heading"><div><h2>Журнал ходов</h2><small>{review.actual ? "Показано актуальное состояние"
+            : review.playing ? "Идёт общее воспроизведение" : "Все участники видят выбранный кадр"}</small></div>
+            <span className="history-live-mark">{review.actual ? "СЕЙЧАС" : "АРХИВ"}</span></div>
+        <div className="history-review-actions">
+            <button type="button" className={review.playing ? "history-stop" : "history-play"}
+                disabled={!isHost || !entries.length}
+                title={!isHost ? "Историей управляет хост" : review.playing ? "Остановить воспроизведение" : "Проиграть с выбранного регистра"}
+                onClick={() => app.socket.emit("set-history-playback", {playing: !review.playing})}>
+                {review.playing ? "■ Остановить" : "▶ Проиграть"}
+            </button>
+            <button type="button" className="history-reset" disabled={!isHost || review.actual}
+                title={!isHost ? "Историей управляет хост" : "Вернуть актуальное состояние"}
+                onClick={() => app.socket.emit("reset-history-review", {reset: true})}>СБРОСИТЬ</button>
+        </div>
+        {entries.length ? <div className="history-rounds">{rounds.map((round) => <div className="history-round" key={round}>
+            <strong>Раунд {round}</strong><div>{entries.filter((entry) => entry.round === round).map((entry) => {
+                const active = selected && selected.round === entry.round && selected.register === entry.register;
+                return <button type="button" key={`${entry.round}-${entry.register}`} className={active ? "active" : ""}
+                    aria-current={active ? "step" : undefined} disabled={!isHost}
+                    title={!isHost ? "Выбранный хостом кадр" : `Состояние перед регистром ${entry.register}`}
+                    onClick={() => select(entry)}>Регистр {entry.register}</button>;
+            })}</div>
+        </div>)}</div> : <p className="history-empty">Выполненных регистров пока нет.</p>}
+        {!isHost ? <small className="history-read-only">Просмотром управляет хост.</small> : null}
+    </section>;
 }
 
 function GamePauseControls({state, app}) {
@@ -1269,6 +1324,8 @@ class Game extends React.Component {
             const timerCueKey = isProgrammingPlayer && state.programmingTimer
                 ? `${state.round}:${state.programmingTimer.global ? "global" : "last"}` : null;
             const localState = {};
+            if (state.paused && !this.state.paused)
+                localState.hudCollapsed = false;
             if (!programmingCueKey) {
                 this.lastProgrammingCueKey = null;
                 localState.programmingCueActive = false;
@@ -1320,6 +1377,9 @@ class Game extends React.Component {
             || state.phase === "resolving" || state.phase === "finished";
         const dockProgramming = bottomDockProgrammingState(state, isPlayer);
         const dockCueClasses = `${state.programmingCueActive ? " rr-phase-cue-active" : ""}${state.timerCueActive ? " rr-timer-cue-active" : ""}`;
+        const historyReview = state.historyReview || {actual: true, playing: false, revision: 0};
+        const reviewingHistory = state.paused && !historyReview.actual;
+        const replayKey = reviewingHistory ? `history-${historyReview.revision}` : "live";
         return <React.Fragment>
         <CommonRoom state={state} app={this}/>
         <HostControls app={this} data={state} timerControls={[]}
@@ -1329,8 +1389,8 @@ class Game extends React.Component {
                 <div><h1>RoboRally</h1><p>Комната {state.roomId} · {state.phase === "programming" ? "программирование" : state.phase === "resolving" ? "исполнение" : state.phase === "power-down-choice" ? "решение Power Down" : state.phase === "reentry" ? "возрождение" : state.phase === "finished" ? "финиш" : "лобби"}</p></div>
                 {state.userId === state.hostId && state.phase !== "lobby" ? <button onClick={() => this.socket.emit("restart-game")}>В лобби</button> : null}
             </header>
-            {state.phase === "lobby" ? <Lobby state={state} app={this} onOpenGuide={this.openGuide}/> : <div className={`game-screen ${state.paused ? "is-paused" : ""}`}>
-                {state.paused ? <section className="pause-banner" role="status"><strong>Игра на паузе</strong><span>Хост может продолжить игру из панели управления.</span></section> : null}
+            {state.phase === "lobby" ? <Lobby state={state} app={this} onOpenGuide={this.openGuide}/> : <div className={`game-screen ${state.paused ? "is-paused" : ""} ${reviewingHistory ? "is-history-review" : ""} ${historyReview.playing ? "is-history-playing" : ""}`}>
+                <PauseBanner state={state}/>
                 {!isPlayer ? <ProgrammingTimer state={state}/> : null}
                 <section className="game-layout">
                     <div className="board-column">
@@ -1357,10 +1417,10 @@ class Game extends React.Component {
                                         style={{gridColumn: `${candidate.x + 1} / ${candidate.x + 2}`, gridRow: `${candidate.y + 1} / ${candidate.y + 2}`}}>
                                         {candidate.archive ? "A" : index + 1}
                                     </div>) : null}
-                                {state.robots.filter((robot) => robot.death).map((robot) => <RobotDeath key={`${robot.userId}-${robot.death.id}`} robot={robot}/>)}
+                                {state.robots.filter((robot) => robot.death).map((robot) => <RobotDeath key={`${replayKey}-${robot.userId}-${robot.death.id}`} robot={robot}/>)}
                                 {state.robots.map((robot) => <Robot key={robot.userId} robot={robot} state={state} ownUserId={state.userId}/>)}
-                                <BoardEvents events={state.boardEvents}/>
-                                <LaserEffects shots={state.laserShots} robots={state.robots}/></div>
+                                <BoardEvents events={state.boardEvents} replayKey={replayKey}/>
+                                <LaserEffects shots={state.laserShots} robots={state.robots} replayKey={replayKey}/></div>
                             <BoardHints state={state} enabled={state.boardHintsEnabled}/>
                             </div>
                         </div>
@@ -1378,6 +1438,7 @@ class Game extends React.Component {
                         <details className="rr-game-disclosure rr-game-journal"><summary>Системный журнал</summary>
                             <section className="rr-panel log" aria-label="Системный журнал">{state.log.map((item, index) => <p key={index}>{item}</p>)}</section>
                         </details>
+                        <HistoryReviewPanel state={state} app={this}/>
                         <GamePauseControls state={state} app={this}/>
                         </div>
                         <div className="rr-hud-footer">
@@ -1403,7 +1464,7 @@ class Game extends React.Component {
                                 }}>?</button>
                         </div>
                         <section className="rr-panel stage" role="status"><h2>{state.phase === "resolving" ? `Регистр ${state.register} / 5` : "Сейчас"}</h2>
-                            <p>{state.paused ? "Игра на паузе" : state.phase === "resolving" ? state.stage : state.phase === "programming" ? "Выбор программы" : state.phase === "reentry" ? "Возрождение роботов" : state.phase === "power-down-choice" ? "Решение Power Down" : "Заезд завершён"}</p></section>
+                            <p>{reviewingHistory ? `Журнал: ${state.stage}` : state.paused ? "Игра на паузе" : state.phase === "resolving" ? state.stage : state.phase === "programming" ? "Выбор программы" : state.phase === "reentry" ? "Возрождение роботов" : state.phase === "power-down-choice" ? "Решение Power Down" : "Заезд завершён"}</p></section>
                         </div>
                     </aside>
                 </section>

@@ -468,6 +468,39 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
     .conveyor-demo-stage { margin-inline: 6px; }
 }
 
+/* Shared, server-authoritative review of completed registers while the game is paused. */
+.pause-banner.history { width: min(680px,calc(100vw - 340px)); border-color: #e6b24e; color: #fff2c8; background: rgba(48,34,16,.96); box-shadow: 0 6px 24px #000c,0 0 19px #df9d3d70; }
+.pause-banner.history span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f1d59f; }
+.rr-playing .dock-scroll .history-review-panel { display: grid; gap: 8px; padding: 10px; border-block: 1px solid #d8a74b80; background: linear-gradient(145deg,rgba(66,48,22,.9),rgba(28,31,33,.94)); }
+.history-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.history-review-heading h2 { margin: 0 0 2px; color: #ffe09a; font-size: .84rem; }
+.history-review-heading small { display: block; color: #c9d4d9; font-size: .64rem; line-height: 1.25; }
+.history-live-mark { flex: none; padding: 3px 6px; border: 1px solid #67c987; border-radius: 999px; color: #aef3c3; background: #183525; font-size: .55rem; font-weight: 900; letter-spacing: .08em; }
+.history-review-panel.reviewing .history-live-mark { border-color: #e4af46; color: #ffe19c; background: #513a15; }
+.history-review-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.history-review-actions button { min-height: 30px; padding: 4px 7px; font-size: .68rem; font-weight: 850; }
+.history-review-actions .history-play { border-color: #65b7df; color: #e7f7ff; background: #1c455b; }
+.history-review-actions .history-stop { border-color: #ee765f; color: #fff0eb; background: #6a2822; }
+.history-review-actions .history-reset { border-color: #d3aa55; color: #ffe8b3; background: #48391f; }
+.history-rounds { display: grid; gap: 7px; max-height: 190px; overflow-y: auto; padding-right: 2px; scrollbar-width: thin; }
+.history-round { display: grid; gap: 4px; }
+.history-round > strong { color: #e8d5a9; font-size: .65rem; text-transform: uppercase; letter-spacing: .055em; }
+.history-round > div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 4px; }
+.history-round button { min-width: 0; padding: 5px 3px; border-color: #60717b; color: #d6e0e4; background: #17242c; font-size: .62rem; white-space: nowrap; }
+.history-round button.active { border-color: #ffd36b; color: #231805; background: #e6ad3e; box-shadow: 0 0 11px #e6a83f66; }
+.history-round button:disabled { opacity: .88; cursor: default; }
+.history-round button.active:disabled { opacity: 1; }
+.history-empty { margin: 2px 0; color: #b7c6cd; font-size: .7rem; }
+.history-read-only { color: #aebcc3; font-size: .62rem; }
+.is-history-review .board-viewport { border-color: #d9a947; box-shadow: 0 13px 36px #0008,0 0 0 2px #f0c36388,0 0 22px #dfa33f55; }
+.is-history-review .board { filter: saturate(.86) brightness(.91); }
+.is-history-playing .board-viewport { animation: history-board-playing 1.35s ease-in-out infinite; }
+@keyframes history-board-playing { 0%,100% { box-shadow: 0 13px 36px #0008,0 0 0 2px #eebc5f88,0 0 18px #dfa33f45; } 50% { box-shadow: 0 13px 36px #0008,0 0 0 2px #ffe199cc,0 0 30px #f0b34788; } }
+@media (max-width: 760px) {
+    .pause-banner.history { width: min(680px,calc(100vw - 18px)); }
+    .history-rounds { max-height: 145px; }
+}
+
 /* The programming state lives in the existing dock handle, so it stays visible without covering the board. */
 .bottom-dock-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 7px; max-width: calc(100vw - 28px); white-space: nowrap; }
 .rr-dock-status-text { overflow: hidden; text-overflow: ellipsis; }
@@ -515,5 +548,5 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
     .conveyor-demo-card-robot { animation: none; transform: translate(250px,150px); }
     .conveyor-demo-turn-mark, .conveyor-demo-no-turn { animation: none; opacity: 1; }
     .bottom-dock.rr-phase-cue-active, .bottom-dock.rr-timer-cue-active,
-    .bottom-dock.rr-dock-warning .bottom-dock-toggle { animation: none; }
+    .bottom-dock.rr-dock-warning .bottom-dock-toggle, .is-history-playing .board-viewport { animation: none; }
 }

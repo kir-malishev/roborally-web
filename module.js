@@ -15,6 +15,9 @@ const STAGE_ROWS = 16;
 const STEP_DELAY_MS = 360;
 const PROGRAMMING_TIMER_MS = 30000;
 const AUTO_FILL_DISPLAY_MS = 900;
+const HISTORY_COMPLETED_ROUNDS = 2;
+const HISTORY_VISUAL_FIELDS = ["phase", "round", "register", "revealedRegisters", "stage",
+    "robots", "flags", "programs", "playerStats", "laserShots", "boardEvents"];
 const BOARD_CARDS = {
     Cross: "Cross.png", "Spin Zone": "Spin.png", "Chess": "Chess.png", "Chop Shop": "ChopShop.png",
     "Risky Exchange": "exchange.png", "Island": "Island.png", "Maelstrom": "Maelstrom.png", "Vault": "Vault.png"
@@ -381,6 +384,14 @@ function wait(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function jsonClone(value) {
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function jsonEqual(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function init(wsServer, gamePath) {
     const app = wsServer.app;
     const registry = wsServer.users;
@@ -400,6 +411,12 @@ function init(wsServer, gamePath) {
             this.programmingTimerGeneration = 0;
             this.autoFillResolveHandle = null;
             this.pauseWaiters = [];
+            this.turnHistory = [];
+            this.historyRecordingRegister = null;
+            this.historyRecordingState = null;
+            this.historyViewFrame = null;
+            this.historyPlaybackHandle = null;
+            this.historyPlaybackGeneration = 0;
             this.room = {
                 ...this.room,
                 inited: true,
@@ -426,6 +443,7 @@ function init(wsServer, gamePath) {
                 programmingTimer: null,
                 programmingAutoFill: null,
                 powerDownChoice: null,
+                historyReview: {selected: null, playing: false, frameIndex: null, revision: 0},
                 board: {name: "Cross", size: BOARD_SIZE, start: START_CARDS[1]},
                 course: {...COURSE_CARDS.find((course) => course.id === "lost-bearings")},
                 courses: COURSE_CARDS,
@@ -437,35 +455,73 @@ function init(wsServer, gamePath) {
             };
         }
 
-        publicState() {
-            const showPrograms = this.room.phase === "resolving" || this.room.phase === "finished";
-            const revealed = showPrograms ? (this.room.revealedRegisters || 0) : 0;
-            const startLayout = START_LAYOUTS[this.room.course.start] || START_LAYOUTS[START_CARDS[1]];
+        publicPrograms(phase = this.room.phase, revealedRegisters = this.room.revealedRegisters || 0) {
+            const showPrograms = phase === "resolving" || phase === "finished";
+            const revealed = showPrograms ? revealedRegisters : 0;
+            return Object.fromEntries(this.room.playerSlots.filter((userId) => userId && this.players[userId]).map((userId) => {
+                const player = this.players[userId];
+                const cards = player.selected.map((id) => this.cardById(player, id));
+                return [userId, {poweredDown: player.poweredDown,
+                    lockedRegisters: [...(player.lockedRegisters || [])],
+                    cards: cards.map((card, index) => (player.lockedRegisters || []).includes(index)
+                        || (showPrograms && index < revealed) ? card : null)}];
+            }));
+        }
+
+        publicPlayerStats() {
+            return Object.fromEntries(Object.entries(this.players).map(([userId, player]) => [userId, {
+                damage: player.damage,
+                lives: player.lives,
+                checkpoints: player.checkpoints,
+                ready: !!player.locked,
+                poweredDown: player.poweredDown,
+                powerDownNextRound: player.powerDownNextRound,
+            }]));
+        }
+
+        publicRobots() {
+            return this.room.robots.filter((robot) => !robot.withdrawn).map((robot) => ({...robot}));
+        }
+
+        publicHistoryReview() {
+            const review = this.room.historyReview || {};
             return {
+                entries: this.historyEntries(),
+                selected: review.selected || null,
+                playing: !!review.playing,
+                frameIndex: Number.isInteger(review.frameIndex) ? review.frameIndex : null,
+                stage: this.historyViewFrame ? this.historyViewFrame.stage : null,
+                // Keep the score panel tied explicitly to the reviewed frame.
+                // The regular player-state channel continues to publish the
+                // canonical game while paused, so clients must not derive
+                // historical public counters from that live state.
+                playerStats: this.historyViewFrame
+                    ? jsonClone(this.historyViewFrame.playerStats || {}) : null,
+                actual: !this.historyViewFrame,
+                revision: Number(review.revision) || 0
+            };
+        }
+
+        publicState() {
+            const startLayout = START_LAYOUTS[this.room.course.start] || START_LAYOUTS[START_CARDS[1]];
+            const state = {
                 ...this.room,
                 startPositions: startLayout.starts.map((position) => ({...position})),
                 fieldFeatures: publicFieldFeatures(this.features, this.startFeatures),
-                programs: Object.fromEntries(this.room.playerSlots.filter((userId) => userId && this.players[userId]).map((userId) => {
-                    const player = this.players[userId];
-                    const cards = player.selected.map((id) => this.cardById(player, id));
-                    return [userId, {poweredDown: player.poweredDown,
-                        lockedRegisters: player.lockedRegisters || [],
-                        cards: cards.map((card, index) => (player.lockedRegisters || []).includes(index)
-                            || (showPrograms && index < revealed) ? card : null)}];
-                })),
-                playerStats: Object.fromEntries(Object.entries(this.players).map(([userId, player]) => [userId, {
-                    damage: player.damage,
-                    lives: player.lives,
-                    checkpoints: player.checkpoints,
-                    ready: !!player.locked,
-                    poweredDown: player.poweredDown,
-                    powerDownNextRound: player.powerDownNextRound,
-                }])),
+                programs: this.publicPrograms(),
+                playerStats: this.publicPlayerStats(),
                 onlinePlayers: [...this.room.onlinePlayers],
                 spectators: [...this.room.spectators],
-                robots: this.room.robots.filter((robot) => !robot.withdrawn).map((robot) => ({...robot})),
+                robots: this.publicRobots(),
                 log: this.room.log.slice(-12)
             };
+            if (this.historyViewFrame) {
+                Object.assign(state, jsonClone(this.historyViewFrame));
+                state.paused = this.room.paused;
+                state.actualPhase = this.room.phase;
+            }
+            state.historyReview = this.publicHistoryReview();
+            return state;
         }
 
         privateState(userId) {
@@ -511,6 +567,229 @@ function init(wsServer, gamePath) {
             this.room.log.push(text);
             if (this.room.log.length > 30)
                 this.room.log.splice(0, this.room.log.length - 30);
+        }
+
+        historyEntries() {
+            return (this.turnHistory || []).flatMap((round) => (round.registers || [])
+                .filter((entry) => entry.completed && entry.frames && entry.frames.length)
+                .map((entry) => ({round: round.round, register: entry.register, frames: entry.frames.length})))
+                .sort((left, right) => left.round - right.round || left.register - right.register);
+        }
+
+        historyRound(roundNumber, create = false) {
+            let round = (this.turnHistory || []).find((item) => item.round === roundNumber);
+            if (!round && create) {
+                round = {round: roundNumber, complete: false, registers: []};
+                this.turnHistory.push(round);
+                this.turnHistory.sort((left, right) => left.round - right.round);
+            }
+            return round || null;
+        }
+
+        pruneTurnHistory() {
+            const complete = (this.turnHistory || []).filter((round) => round.complete)
+                .sort((left, right) => left.round - right.round).slice(-HISTORY_COMPLETED_ROUNDS);
+            const incomplete = (this.turnHistory || []).filter((round) => !round.complete)
+                .sort((left, right) => left.round - right.round).slice(-1);
+            const keep = new Set([...complete, ...incomplete]);
+            this.turnHistory = (this.turnHistory || []).filter((round) => keep.has(round))
+                .sort((left, right) => left.round - right.round);
+        }
+
+        captureHistoryVisualState() {
+            return jsonClone({
+                phase: "resolving",
+                round: this.room.round,
+                register: this.room.register,
+                revealedRegisters: this.room.revealedRegisters || 0,
+                stage: this.room.stage,
+                robots: this.publicRobots(),
+                flags: this.room.flags,
+                programs: this.publicPrograms("resolving", this.room.revealedRegisters || 0),
+                playerStats: this.publicPlayerStats(),
+                laserShots: this.room.laserShots || [],
+                boardEvents: this.room.boardEvents || []
+            });
+        }
+
+        beginHistoryRegister(register) {
+            const round = this.historyRound(this.room.round, true);
+            const previous = round.registers.find((entry) => entry.register === register);
+            if (previous)
+                round.registers.splice(round.registers.indexOf(previous), 1);
+            const entry = {register, completed: false, frames: []};
+            round.registers.push(entry);
+            round.registers.sort((left, right) => left.register - right.register);
+            this.historyRecordingRegister = entry;
+            this.historyRecordingState = null;
+            this.pruneTurnHistory();
+        }
+
+        recordHistoryFrame(delay) {
+            const entry = this.historyRecordingRegister;
+            if (!entry || entry.register !== this.room.register)
+                return false;
+            const state = this.captureHistoryVisualState();
+            const duration = Math.max(0, Number(delay) || 0);
+            if (!entry.frames.length) {
+                entry.frames.push({duration, state});
+            } else {
+                const changes = {};
+                HISTORY_VISUAL_FIELDS.forEach((field) => {
+                    if (!jsonEqual(this.historyRecordingState[field], state[field]))
+                        changes[field] = state[field];
+                });
+                entry.frames.push({duration, changes});
+            }
+            this.historyRecordingState = state;
+            return true;
+        }
+
+        completeHistoryRegister() {
+            if (!this.historyRecordingRegister || !this.historyRecordingRegister.frames.length)
+                return false;
+            this.historyRecordingRegister.completed = true;
+            return true;
+        }
+
+        finishHistoryRound() {
+            const round = this.historyRound(this.room.round);
+            if (round) {
+                round.registers = round.registers.filter((entry) => entry.completed && entry.frames.length);
+                round.complete = round.registers.length === 5;
+            }
+            this.historyRecordingRegister = null;
+            this.historyRecordingState = null;
+            this.pruneTurnHistory();
+        }
+
+        historyRegister(roundNumber, register) {
+            const round = this.historyRound(roundNumber);
+            return round && round.registers.find((entry) => entry.register === register && entry.completed && entry.frames.length) || null;
+        }
+
+        reconstructHistoryFrame(entry, frameIndex) {
+            if (!entry || !entry.frames || !entry.frames.length)
+                return null;
+            const lastIndex = Math.max(0, Math.min(entry.frames.length - 1, Number(frameIndex) || 0));
+            let state = {};
+            for (let index = 0; index <= lastIndex; index++) {
+                const frame = entry.frames[index];
+                if (frame.state) state = jsonClone(frame.state);
+                else Object.assign(state, jsonClone(frame.changes || {}));
+            }
+            return state;
+        }
+
+        stopHistoryPlayback(update = false) {
+            this.historyPlaybackGeneration = (this.historyPlaybackGeneration || 0) + 1;
+            if (this.historyPlaybackHandle) {
+                clearTimeout(this.historyPlaybackHandle);
+                this.historyPlaybackHandle = null;
+            }
+            if (!this.room.historyReview)
+                this.room.historyReview = {selected: null, playing: false, frameIndex: null, revision: 0};
+            const changed = !!this.room.historyReview.playing;
+            this.room.historyReview.playing = false;
+            if (update && changed) this.update();
+            return changed;
+        }
+
+        resetHistoryReview(update = true) {
+            this.stopHistoryPlayback(false);
+            const review = this.room.historyReview || {};
+            const changed = !!this.historyViewFrame || !!review.selected || review.frameIndex != null;
+            this.historyViewFrame = null;
+            this.room.historyReview = {
+                selected: null,
+                playing: false,
+                frameIndex: null,
+                revision: (Number(review.revision) || 0) + (changed ? 1 : 0)
+            };
+            if (update && changed) this.update();
+            return changed;
+        }
+
+        clearTurnHistory() {
+            this.stopHistoryPlayback(false);
+            this.turnHistory = [];
+            this.historyRecordingRegister = null;
+            this.historyRecordingState = null;
+            this.historyViewFrame = null;
+            this.room.historyReview = {selected: null, playing: false, frameIndex: null, revision: 0};
+        }
+
+        selectHistoryRegister(roundNumber, register) {
+            if (!this.room.paused)
+                return false;
+            const entry = this.historyRegister(Number(roundNumber), Number(register));
+            if (!entry)
+                return false;
+            this.stopHistoryPlayback(false);
+            this.historyViewFrame = this.reconstructHistoryFrame(entry, 0);
+            const review = this.room.historyReview || {};
+            this.room.historyReview = {
+                selected: {round: Number(roundNumber), register: Number(register)},
+                playing: false,
+                frameIndex: 0,
+                revision: (Number(review.revision) || 0) + 1
+            };
+            this.update();
+            return true;
+        }
+
+        historyPlaybackSequence(roundNumber, register) {
+            const entries = this.historyEntries();
+            let start = entries.findIndex((entry) => entry.round === roundNumber && entry.register === register);
+            if (start < 0) start = 0;
+            return entries.slice(start).flatMap((item) => {
+                const entry = this.historyRegister(item.round, item.register);
+                let state = {};
+                return entry.frames.map((frame, frameIndex) => {
+                    if (frame.state) state = jsonClone(frame.state);
+                    else Object.assign(state, jsonClone(frame.changes || {}));
+                    return {round: item.round, register: item.register, frameIndex, duration: frame.duration, state: jsonClone(state)};
+                });
+            });
+        }
+
+        startHistoryPlayback() {
+            if (!this.room.paused || (this.room.historyReview && this.room.historyReview.playing))
+                return false;
+            const selected = (this.room.historyReview && this.room.historyReview.selected) || this.historyEntries()[0];
+            if (!selected)
+                return false;
+            const sequence = this.historyPlaybackSequence(selected.round, selected.register);
+            if (!sequence.length)
+                return false;
+            this.stopHistoryPlayback(false);
+            const generation = this.historyPlaybackGeneration;
+            let cursor = 0;
+            const advance = () => {
+                if (generation !== this.historyPlaybackGeneration || !this.room.paused)
+                    return;
+                if (cursor >= sequence.length) {
+                    this.historyPlaybackHandle = null;
+                    this.room.historyReview.playing = false;
+                    this.update();
+                    return;
+                }
+                const frame = sequence[cursor++];
+                this.historyViewFrame = jsonClone(frame.state);
+                const review = this.room.historyReview || {};
+                this.room.historyReview = {
+                    selected: {round: frame.round, register: frame.register},
+                    playing: true,
+                    frameIndex: frame.frameIndex,
+                    revision: (Number(review.revision) || 0) + 1
+                };
+                this.update();
+                this.historyPlaybackHandle = setTimeout(advance, Math.max(0, frame.duration));
+                if (this.historyPlaybackHandle.unref)
+                    this.historyPlaybackHandle.unref();
+            };
+            advance();
+            return true;
         }
 
         clearBoardEvents() {
@@ -762,6 +1041,7 @@ function init(wsServer, gamePath) {
         startRound() {
             this.cancelProgrammingTimer();
             this.cancelAutoFillResolution();
+            this.pruneTurnHistory();
             this.room.programmingAutoFill = null;
             this.room.phase = "programming";
             this.room.round += 1;
@@ -814,6 +1094,7 @@ function init(wsServer, gamePath) {
         startGame() {
             this.cancelProgrammingTimer();
             this.cancelAutoFillResolution();
+            this.clearTurnHistory();
             this.room.paused = false;
             this.releasePauseWaiters();
             const users = this.room.playerSlots.filter(Boolean);
@@ -1142,6 +1423,7 @@ function init(wsServer, gamePath) {
         async showStage(stage, delay = STEP_DELAY_MS) {
             await this.waitWhilePaused();
             this.room.stage = stage;
+            this.recordHistoryFrame(delay);
             this.update();
             await wait(delay);
             await this.waitWhilePaused();
@@ -1491,6 +1773,7 @@ function init(wsServer, gamePath) {
                 this.restoreMovingFlags();
                 this.room.register = register + 1;
                 this.room.revealedRegisters = register + 1;
+                this.beginHistoryRegister(register + 1);
                 await this.showStage(`Регистр ${register + 1}: карты открыты`, 500);
                 const actions = activeUsers.map((userId) => ({
                     userId,
@@ -1525,6 +1808,7 @@ function init(wsServer, gamePath) {
                 if (this.room.phase === "finished") break;
                 this.touchCheckpoints();
                 await this.showStage(`Регистр ${register + 1}: флаги и архивы`);
+                this.completeHistoryRegister();
             }
             if (this.resolutionId !== resolutionId || this.room.phase === "lobby")
                 return;
@@ -1539,6 +1823,7 @@ function init(wsServer, gamePath) {
                 if (repaired)
                     await this.showStage("Конец раунда: ремонт", Math.max(STEP_DELAY_MS, 700));
             }
+            this.finishHistoryRound();
             activeUsers.forEach((userId) => {
                 const player = this.players[userId];
                 if (player.poweredDown) {
@@ -1597,6 +1882,7 @@ function init(wsServer, gamePath) {
                     this.programmingTimerHandle = null;
                 }
             } else {
+                this.resetHistoryReview(false);
                 if (timer && timer.paused) {
                     timer.endsAt = Date.now() + Math.max(0, timer.pausedRemainingMs || 0);
                     timer.paused = false;
@@ -1744,7 +2030,8 @@ function init(wsServer, gamePath) {
                 room: {...this.room, onlinePlayers: [], spectators: [...this.room.spectators]},
                 players: this.players,
                 deck: this.deck,
-                discard: this.discard
+                discard: this.discard,
+                turnHistory: this.turnHistory
             };
         }
 
@@ -1755,6 +2042,26 @@ function init(wsServer, gamePath) {
             this.players = snapshot.players || {};
             this.deck = snapshot.deck || [];
             this.discard = snapshot.discard || [];
+            this.turnHistory = Array.isArray(snapshot.turnHistory) ? jsonClone(snapshot.turnHistory) : [];
+            this.historyRecordingRegister = null;
+            this.historyRecordingState = null;
+            this.historyPlaybackHandle = null;
+            this.historyPlaybackGeneration = 0;
+            this.pruneTurnHistory();
+            const savedReview = this.room.historyReview || {};
+            this.room.historyReview = {
+                selected: savedReview.selected || null,
+                playing: false,
+                frameIndex: Number.isInteger(savedReview.frameIndex) ? savedReview.frameIndex : null,
+                revision: Number(savedReview.revision) || 0
+            };
+            const selected = this.room.paused && this.room.historyReview.selected;
+            const entry = selected && this.historyRegister(Number(selected.round), Number(selected.register));
+            this.historyViewFrame = entry ? this.reconstructHistoryFrame(entry, this.room.historyReview.frameIndex || 0) : null;
+            if (!this.historyViewFrame) {
+                this.room.historyReview.selected = null;
+                this.room.historyReview.frameIndex = null;
+            }
         }
 
         userJoin(data) {
@@ -1865,6 +2172,7 @@ function init(wsServer, gamePath) {
             if (event === "restart-game" && userId === this.room.hostId) {
                 this.cancelProgrammingTimer();
                 this.cancelAutoFillResolution();
+                this.clearTurnHistory();
                 this.room.paused = false;
                 this.releasePauseWaiters();
                 this.resolutionId = (this.resolutionId || 0) + 1;
@@ -1885,6 +2193,21 @@ function init(wsServer, gamePath) {
                 if (this.setPaused(value.paused))
                     this.addLog(value.paused ? "Хост поставил игру на паузу." : "Хост продолжил игру.");
                 return this.update();
+            }
+            if (this.room.paused && userId === this.room.hostId && event === "select-history-register"
+                && value && Number.isInteger(Number(value.round)) && Number.isInteger(Number(value.register))) {
+                this.selectHistoryRegister(Number(value.round), Number(value.register));
+                return;
+            }
+            if (this.room.paused && userId === this.room.hostId && event === "set-history-playback"
+                && value && typeof value.playing === "boolean") {
+                if (value.playing) this.startHistoryPlayback();
+                else this.stopHistoryPlayback(true);
+                return;
+            }
+            if (this.room.paused && userId === this.room.hostId && event === "reset-history-review") {
+                this.resetHistoryReview(true);
+                return;
             }
             if (this.room.paused && this.room.phase !== "lobby")
                 return;

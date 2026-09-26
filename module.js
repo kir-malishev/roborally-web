@@ -13,7 +13,7 @@ const ROBOT_COLORS = ["#f04444", "#2d82ff", "#ffd23f", "#27c56d", "#b66dff", "#f
 const BOARD_SIZE = 12;
 const STAGE_ROWS = 16;
 const STEP_DELAY_MS = 360;
-const PROGRAMMING_TIMER_MS = 30000;
+const DEFAULT_GAME_OPTIONS = Object.freeze({startingLives: 3, lastPlayerSeconds: 30, powerDownMode: "classic", finishAllFlags: false});
 const AUTO_FILL_DISPLAY_MS = 900;
 const HISTORY_COMPLETED_ROUNDS = 2;
 const HISTORY_VISUAL_FIELDS = ["phase", "round", "register", "revealedRegisters", "stage",
@@ -392,6 +392,19 @@ function jsonEqual(left, right) {
     return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function validGameOption(key, value) {
+    if (key === "finishAllFlags") return typeof value === "boolean";
+    if (key === "startingLives" || key === "lastPlayerSeconds")
+        return value === null || (Number.isSafeInteger(value) && value > 0);
+    return key === "powerDownMode" && ["classic", "simple"].includes(value);
+}
+
+function normalizeGameOptions(options) {
+    const source = options && typeof options === "object" ? options : {};
+    return Object.fromEntries(Object.entries(DEFAULT_GAME_OPTIONS).map(([key, fallback]) =>
+        [key, validGameOption(key, source[key]) ? source[key] : fallback]));
+}
+
 function init(wsServer, gamePath) {
     const app = wsServer.app;
     const registry = wsServer.users;
@@ -437,12 +450,15 @@ function init(wsServer, gamePath) {
                 log: ["Комната создана. Выберите роль игрока или зрителя."],
                 winnerId: null,
                 winnerReason: null,
+                finishOrder: [],
                 resolution: null,
                 laserShots: [],
                 boardEvents: [],
                 programmingTimer: null,
                 programmingAutoFill: null,
                 powerDownChoice: null,
+                gameOptions: {...DEFAULT_GAME_OPTIONS},
+                activePowerDownMode: "classic",
                 historyReview: {selected: null, playing: false, frameIndex: null, revision: 0},
                 board: {name: "Cross", size: BOARD_SIZE, start: START_CARDS[1]},
                 course: {...COURSE_CARDS.find((course) => course.id === "lost-bearings")},
@@ -473,6 +489,7 @@ function init(wsServer, gamePath) {
                 damage: player.damage,
                 lives: player.lives,
                 checkpoints: player.checkpoints,
+                finished: !!player.finished,
                 ready: !!player.locked,
                 poweredDown: player.poweredDown,
                 powerDownNextRound: player.powerDownNextRound,
@@ -537,6 +554,7 @@ function init(wsServer, gamePath) {
                 damage: player.damage,
                 lives: player.lives,
                 checkpoints: player.checkpoints,
+                finished: !!player.finished,
                 poweredDown: player.poweredDown,
                 powerDownIntent: player.powerDownIntent,
                 canPowerDown: player.damage > 0 && !player.poweredDown && !powerDownDisabled,
@@ -961,7 +979,7 @@ function init(wsServer, gamePath) {
         }
 
         robotAt(x, y, excludedUserId) {
-            return this.room.robots.find((robot) => !robot.eliminated && !robot.destroyed && robot.userId !== excludedUserId && robot.x === x && robot.y === y);
+            return this.room.robots.find((robot) => !robot.eliminated && !robot.destroyed && !robot.withdrawn && robot.userId !== excludedUserId && robot.x === x && robot.y === y);
         }
 
         isInside(x, y) {
@@ -1045,6 +1063,7 @@ function init(wsServer, gamePath) {
             this.room.programmingAutoFill = null;
             this.room.phase = "programming";
             this.room.round += 1;
+            this.room.activePowerDownMode = this.room.gameOptions.powerDownMode;
             this.room.register = null;
             this.room.revealedRegisters = 0;
             this.room.resolution = null;
@@ -1056,7 +1075,7 @@ function init(wsServer, gamePath) {
                 player.powerDownIntent = false;
                 player.powerDownContinuation = null;
                 const robot = this.getRobot(userId);
-                if (robot && robot.eliminated) {
+                if (robot && (robot.eliminated || robot.withdrawn)) {
                     player.hand = [];
                     player.selected = Array(5).fill(null);
                     player.locked = true;
@@ -1106,6 +1125,7 @@ function init(wsServer, gamePath) {
             this.room.round = 0;
             this.room.winnerId = null;
             this.room.winnerReason = null;
+            this.room.finishOrder = [];
             this.room.board = {name: this.room.course.board, size: BOARD_SIZE, start: this.room.course.start};
             this.room.flags = this.room.course.flags.map(([x, y], index) => ({x, y, homeX: x, homeY: y, number: index + 1}));
             const startLayout = START_LAYOUTS[this.room.course.start] || START_LAYOUTS[START_CARDS[1]];
@@ -1129,9 +1149,10 @@ function init(wsServer, gamePath) {
                 this.players[userId] = {
                     hand: [], selected: Array(5).fill(null), registers: [], lockedRegisters: [], locked: false,
                     autoFilledRegisters: [],
-                    damage: this.specialRules.startingDamage || 0, lives: 3, checkpoints: 0, poweredDown: false, powerDownIntent: false,
+                    damage: this.specialRules.startingDamage || 0, lives: this.room.gameOptions.startingLives,
+                    checkpoints: 0, poweredDown: false, powerDownIntent: false,
                     powerDownNextRound: false, powerDownContinuation: null, powerDownDamage: 0,
-                    powerDownReentryChoiceRequired: false
+                    powerDownReentryChoiceRequired: false, finished: false
                 };
             });
             this.deck = shuffle(makeDeck());
@@ -1159,18 +1180,30 @@ function init(wsServer, gamePath) {
                 return false;
             const remaining = this.room.robots.filter((robot) => {
                 const player = this.players[robot.userId];
-                return player && player.lives > 0 && !robot.eliminated;
+                return player && (player.lives === null || player.lives > 0) && !robot.eliminated;
             });
             if (remaining.length !== 1)
                 return false;
             const winner = remaining[0];
             const everyOpponentEliminated = this.room.robots.every((robot) => robot.userId === winner.userId
-                || robot.eliminated || !this.players[robot.userId] || this.players[robot.userId].lives <= 0);
+                || robot.eliminated || !this.players[robot.userId]
+                || (this.players[robot.userId].lives !== null && this.players[robot.userId].lives <= 0));
             if (!everyOpponentEliminated)
                 return false;
             this.room.phase = "finished";
             this.room.winnerId = winner.userId;
             this.room.winnerReason = "last-robot-standing";
+            return true;
+        }
+
+        checkFlagRaceComplete() {
+            if (!this.room.gameOptions.finishAllFlags || this.room.phase === "lobby"
+                || this.room.phase === "finished" || !this.room.finishOrder.length) return false;
+            if (!this.room.playerSlots.filter(Boolean).every((id) =>
+                this.players[id].finished || this.getRobot(id).eliminated)) return false;
+            this.room.phase = "finished";
+            this.room.winnerId = this.room.finishOrder[0];
+            this.room.winnerReason = "flags";
             return true;
         }
 
@@ -1201,11 +1234,12 @@ function init(wsServer, gamePath) {
             robot.death = {x: robot.x, y: robot.y, id: destructionId, reason};
             if (player.powerDownNextRound && !player.poweredDown)
                 player.powerDownReentryChoiceRequired = true;
-            player.lives -= 1;
+            if (player.lives !== null)
+                player.lives -= 1;
             player.damage = 0;
             if (!player.poweredDown)
                 player.powerDownDamage = 0;
-            if (player.lives <= 0) {
+            if (player.lives !== null && player.lives <= 0) {
                 robot.eliminated = true;
                 player.poweredDown = false;
                 player.powerDownIntent = false;
@@ -1215,6 +1249,7 @@ function init(wsServer, gamePath) {
                 robot.y = null;
                 this.addLog(`${this.playerName(robot.userId)} потерял последнюю жизнь.`);
                 this.requestSurvivalVictoryCheck();
+                this.checkFlagRaceComplete();
                 return;
             }
             robot.destroyed = true;
@@ -1227,7 +1262,7 @@ function init(wsServer, gamePath) {
         preparePowerDownChoice() {
             const users = this.room.playerSlots.filter((userId) => {
                 const robot = userId && this.getRobot(userId);
-                return robot && this.players[userId] && this.players[userId].poweredDown && !robot.eliminated;
+                return robot && this.players[userId] && this.players[userId].poweredDown && !robot.eliminated && !robot.withdrawn;
             });
             if (!users.length)
                 return false;
@@ -1380,7 +1415,7 @@ function init(wsServer, gamePath) {
         }
 
         move(robot, direction, cause, visited = new Set()) {
-            if (robot.eliminated || robot.destroyed)
+            if (robot.eliminated || robot.destroyed || robot.withdrawn)
                 return false;
             const signature = `${robot.userId}:${robot.x},${robot.y}:${direction}`;
             if (visited.has(signature))
@@ -1431,7 +1466,7 @@ function init(wsServer, gamePath) {
         }
 
         async executeCard(robot, card) {
-            if (robot.eliminated || robot.destroyed)
+            if (robot.eliminated || robot.destroyed || robot.withdrawn)
                 return;
             if (card.type === "left") this.turnRobot(robot, -1);
             if (card.type === "right") this.turnRobot(robot, 1);
@@ -1449,7 +1484,7 @@ function init(wsServer, gamePath) {
         }
 
         damageRobot(robot, amount, source) {
-            if (!robot || robot.eliminated || robot.destroyed)
+            if (!robot || robot.eliminated || robot.destroyed || robot.withdrawn)
                 return;
             const player = this.players[robot.userId];
             player.damage += amount;
@@ -1511,7 +1546,7 @@ function init(wsServer, gamePath) {
 
         moveConveyors(expressOnly) {
             this.clearBoardEvents();
-            const candidates = this.room.robots.filter((robot) => !robot.eliminated && !robot.destroyed)
+            const candidates = this.room.robots.filter((robot) => !robot.eliminated && !robot.destroyed && !robot.withdrawn)
                 .map((robot) => ({robot, source: this.boardKey(robot), direction: this.conveyorAt(robot)}))
                 .filter((item) => item.direction && (!expressOnly || this.isExpressAt(item.robot)))
                 .map((item) => {
@@ -1638,7 +1673,7 @@ function init(wsServer, gamePath) {
         activateGears() {
             this.clearBoardEvents();
             this.room.robots.forEach((robot) => {
-                if (robot.eliminated || robot.destroyed)
+                if (robot.eliminated || robot.destroyed || robot.withdrawn)
                     return;
                 const gear = this.isOnFactory(robot) && this.features.gears[this.boardKey(robot)];
                 if (gear) {
@@ -1668,7 +1703,7 @@ function init(wsServer, gamePath) {
             });
             this.room.robots.forEach((robot) => {
                 const player = this.players[robot.userId];
-                if (!robot.eliminated && !robot.destroyed && player && !player.poweredDown)
+                if (!robot.eliminated && !robot.destroyed && !robot.withdrawn && player && !player.poweredDown)
                     addShot(this.traceLaser(robot.x, robot.y, robot.direction), robot,
                         this.specialRules.robotLaserDamage || 1, robot.userId);
             });
@@ -1692,7 +1727,7 @@ function init(wsServer, gamePath) {
         touchCheckpoints() {
             this.clearBoardEvents();
             this.room.robots.forEach((robot) => {
-                if (robot.eliminated || robot.destroyed)
+                if (robot.eliminated || robot.destroyed || robot.withdrawn)
                     return;
                 const player = this.players[robot.userId];
                 const flag = this.room.flags.find((item) => item.x === robot.x && item.y === robot.y);
@@ -1705,9 +1740,19 @@ function init(wsServer, gamePath) {
                         this.addBoardEvent("flag", robot, {flagNumber: flag.number});
                         this.addLog(`${this.playerName(robot.userId)} активирует флаг ${flag.number}.`);
                         if (player.checkpoints === this.room.flags.length) {
-                            this.room.phase = "finished";
-                            this.room.winnerId = robot.userId;
-                            this.room.winnerReason = "flags";
+                            this.room.finishOrder.push(robot.userId);
+                            player.finished = true;
+                            if (this.room.gameOptions.finishAllFlags) {
+                                robot.withdrawn = true;
+                                robot.x = null;
+                                robot.y = null;
+                                player.locked = true;
+                                this.addLog(`${this.playerName(robot.userId)} собрал все флаги и завершил свой заезд.`);
+                            } else {
+                                this.room.phase = "finished";
+                                this.room.winnerId = robot.userId;
+                                this.room.winnerReason = "flags";
+                            }
                         }
                     } else if (previousArchive !== `${robot.x},${robot.y}`) {
                         this.addBoardEvent("archive", robot, {onFlag: true});
@@ -1719,6 +1764,7 @@ function init(wsServer, gamePath) {
                         this.addBoardEvent("archive", robot);
                 }
             });
+            this.checkFlagRaceComplete();
         }
 
         cleanupRound() {
@@ -1726,7 +1772,7 @@ function init(wsServer, gamePath) {
             this.clearBoardEvents();
             let repaired = 0;
             this.room.robots.forEach((robot) => {
-                if (robot.eliminated || robot.destroyed || !this.isOnFactory(robot))
+                if (robot.eliminated || robot.destroyed || robot.withdrawn || !this.isOnFactory(robot))
                     return;
                 const onFlag = this.room.flags.some((flag) => flag.x === robot.x && flag.y === robot.y);
                 if (this.features.repairs.has(this.boardKey(robot)) || onFlag) {
@@ -1747,6 +1793,19 @@ function init(wsServer, gamePath) {
         }
 
         confirmPowerDownIntents(userIds) {
+            if (this.room.activePowerDownMode === "simple") {
+                userIds.filter((userId) => this.players[userId].powerDownIntent).forEach((userId) => {
+                    const player = this.players[userId];
+                    this.discardProgram(player);
+                    player.damage = 0;
+                    player.powerDownDamage = 0;
+                    player.poweredDown = true;
+                    player.powerDownNextRound = false;
+                    player.locked = true;
+                    this.addLog(`${this.playerName(userId)} входит в Power Down в текущем раунде и снимает все повреждения.`);
+                });
+                return;
+            }
             userIds.forEach((userId) => {
                 const player = this.players[userId];
                 player.powerDownNextRound = !!player.powerDownIntent;
@@ -1781,7 +1840,7 @@ function init(wsServer, gamePath) {
                     robot: this.getRobot(userId),
                     card: this.cardById(this.players[userId], this.players[userId].selected[register])
                 })).filter((item) => item.robot && item.card && !item.player.poweredDown
-                    && !item.robot.eliminated && !item.robot.destroyed)
+                    && !item.robot.eliminated && !item.robot.destroyed && !item.robot.withdrawn)
                     .sort((left, right) => right.card.priority - left.card.priority);
                 for (const {robot, card} of actions) {
                     await this.executeCard(robot, card);
@@ -1889,6 +1948,8 @@ function init(wsServer, gamePath) {
                     delete timer.pausedRemainingMs;
                     this.scheduleProgrammingTimer(this.programmingTimerGeneration);
                 }
+                if (this.room.phase === "programming")
+                    this.maybeStartProgrammingTimer();
                 this.releasePauseWaiters();
             }
             return true;
@@ -1943,10 +2004,12 @@ function init(wsServer, gamePath) {
         maybeStartProgrammingTimer() {
             if (this.room.phase !== "programming")
                 return false;
-            const players = this.room.playerSlots.filter((userId) => userId && this.players[userId]);
+            const players = this.room.playerSlots.filter((userId) => userId && this.players[userId]
+                && !this.getRobot(userId)?.eliminated && !this.getRobot(userId)?.withdrawn);
             const pending = players.filter((userId) => !this.players[userId].locked);
             const courseSeconds = Number(this.specialRules.programmingSeconds) || 0;
             const global = courseSeconds > 0;
+            const lastPlayerSeconds = this.room.gameOptions.lastPlayerSeconds;
             if (this.room.programmingTimer) {
                 if (this.room.programmingTimer.global) {
                     this.room.programmingTimer.userIds = [...pending];
@@ -1954,16 +2017,16 @@ function init(wsServer, gamePath) {
                 }
                 return false;
             }
-            if (players.length < 2 || !pending.length || (!global && pending.length !== 1))
+            if (!pending.length || (!global && (players.length < 2 || pending.length !== 1 || lastPlayerSeconds === null)))
                 return false;
-            const seconds = global ? courseSeconds : PROGRAMMING_TIMER_MS / 1000;
+            const seconds = global ? courseSeconds : lastPlayerSeconds;
             const userIds = global ? pending : [pending[0]];
             const generation = ++this.programmingTimerGeneration;
             const endsAt = Date.now() + seconds * 1000;
             this.room.programmingTimer = {userId: userIds[0], userIds: [...userIds], global, endsAt, remaining: seconds};
             this.addLog(global
                 ? `Особое правило «${this.room.course.name}»: запущен общий таймер программирования на ${seconds} секунд.`
-                : `${this.playerName(userIds[0])} остаётся последним: запущен таймер программирования на 30 секунд.`);
+                : `${this.playerName(userIds[0])} остаётся последним: запущен таймер программирования на ${seconds} секунд.`);
             this.scheduleProgrammingTimer(generation);
             return true;
         }
@@ -1978,6 +2041,12 @@ function init(wsServer, gamePath) {
             this.cancelProgrammingTimer();
             const fills = userIds.map((id) => {
                 const player = this.players[id];
+                if (this.room.activePowerDownMode === "simple" && player.powerDownIntent) {
+                    player.locked = true;
+                    player.autoFilledRegisters = [];
+                    this.addLog(`Время ${this.playerName(id)} истекло: Power Down автоматически подтверждён.`);
+                    return {userId: id, registers: [], powerDown: true};
+                }
                 const selected = new Set(player.selected.filter(Boolean));
                 const available = shuffle(player.hand.filter((card) => !selected.has(card.id))).map((card) => card.id);
                 const registers = [];
@@ -2037,6 +2106,10 @@ function init(wsServer, gamePath) {
 
         setSnapshot(snapshot) {
             Object.assign(this.room, snapshot.room);
+            this.room.gameOptions = normalizeGameOptions(this.room.gameOptions);
+            this.room.finishOrder = Array.isArray(this.room.finishOrder) ? this.room.finishOrder : [];
+            this.room.activePowerDownMode = ["classic", "simple"].includes(this.room.activePowerDownMode)
+                ? this.room.activePowerDownMode : this.room.gameOptions.powerDownMode;
             this.room.onlinePlayers = new JSONSet();
             this.room.spectators = new JSONSet(snapshot.room.spectators || []);
             this.players = snapshot.players || {};
@@ -2100,6 +2173,77 @@ function init(wsServer, gamePath) {
                 return;
             }
             const value = args[0];
+            if (event === "set-game-option" && userId === this.room.hostId && value && typeof value === "object") {
+                const {key, setting} = value;
+                if (!validGameOption(key, setting) || this.room.gameOptions[key] === setting) return;
+                this.room.gameOptions[key] = setting;
+                if (key === "startingLives" && this.room.phase !== "lobby") {
+                    Object.entries(this.players).forEach(([id, player]) => {
+                        if (setting === null || player.lives === null || player.lives > setting) player.lives = setting;
+                        const robot = this.getRobot(id);
+                        if (setting === null && robot?.eliminated && this.room.phase !== "finished") {
+                            robot.eliminated = false;
+                            robot.destroyed = true;
+                            robot.destroyedOrder = ++this.destructionCounter;
+                            player.locked = true;
+                            player.damage = 0;
+                            if (this.room.phase === "reentry" && !this.room.reentryQueue.includes(id))
+                                this.room.reentryQueue.push(id);
+                        }
+                    });
+                }
+                if (key === "lastPlayerSeconds" && this.room.phase === "programming") {
+                    if (this.room.programmingTimer && !this.room.programmingTimer.global)
+                        this.cancelProgrammingTimer();
+                    if (!this.room.paused) this.maybeStartProgrammingTimer();
+                }
+                if (key === "finishAllFlags" && !setting && this.room.finishOrder.length && this.room.phase !== "finished") {
+                    this.room.phase = "finished";
+                    this.room.winnerId = this.room.finishOrder[0];
+                    this.room.winnerReason = "flags";
+                }
+                if (this.room.phase === "finished") {
+                    this.cancelProgrammingTimer();
+                    this.cancelAutoFillResolution();
+                    if (this.room.paused) this.setPaused(false);
+                }
+                this.addLog(`Хост изменил настройку игры: ${key === "startingLives" ? "жизни" : key === "lastPlayerSeconds" ? "таймер последнего игрока" : key === "finishAllFlags" ? "доигрывание флагов" : "Power Down"}.`);
+                return this.update();
+            }
+            if (event === "set-player-lives" && userId === this.room.hostId && this.room.phase !== "lobby"
+                && this.room.phase !== "finished" && value && typeof value === "object") {
+                const targetId = value.userId;
+                const lives = value.lives;
+                if (this.room.gameOptions.startingLives === null || !this.room.playerSlots.includes(targetId)
+                    || !this.players[targetId] || !this.getRobot(targetId)
+                    || !(lives === null || (Number.isSafeInteger(lives) && lives > 0))) return;
+                const player = this.players[targetId];
+                const robot = this.getRobot(targetId);
+                if (player.lives === lives) return;
+                const wasEliminated = !!robot.eliminated;
+                player.lives = lives;
+                if (wasEliminated) {
+                    robot.eliminated = false;
+                    robot.destroyed = true;
+                    robot.destroyedOrder = ++this.destructionCounter;
+                    player.locked = true;
+                    player.damage = 0;
+                    player.powerDownDamage = 0;
+                    this.addLog(`${this.playerName(targetId)} получил жизни от хоста и вернётся перед следующим раундом.`);
+                    if (this.room.phase === "reentry" && !this.room.reentryQueue.includes(targetId))
+                        this.room.reentryQueue.push(targetId);
+                } else {
+                    this.addLog(`Хост установил число жизней ${this.playerName(targetId)}: ${lives === null ? "∞" : lives}.`);
+                }
+                if (this.room.phase === "programming" && this.areAllProgramsLocked())
+                    this.resolveRound().catch((error) => this.registry.log(`roborally resolve: ${error.stack}`));
+                if (this.room.phase === "finished") {
+                    this.cancelProgrammingTimer();
+                    this.cancelAutoFillResolution();
+                    if (this.room.paused) this.setPaused(false);
+                }
+                return this.update();
+            }
             if (event === "remove-player" && userId === this.room.hostId && typeof value === "string")
                 return this.removePlayer(value);
             if (event === "give-host" && userId === this.room.hostId && typeof value === "string") {
@@ -2229,8 +2373,19 @@ function init(wsServer, gamePath) {
                 player.powerDownIntent = value.enabled;
                 return this.update();
             }
-            if (player.locked)
+            if (player.locked) {
+                if (event === "unlock-program" && this.room.gameOptions.lastPlayerSeconds === null
+                    && !this.room.programmingAutoFill && !this.room.programmingTimer
+                    && !this.areAllProgramsLocked() && !player.poweredDown
+                    && !this.getRobot(userId).eliminated && !this.getRobot(userId).withdrawn) {
+                    player.locked = false;
+                    this.addLog(`${this.playerName(userId)} отменил готовность.`);
+                    return this.update();
+                }
                 return;
+            }
+            if (this.room.activePowerDownMode === "simple" && player.powerDownIntent
+                && ["assign-register", "swap-registers", "clear-register", "toggle-card", "auto-program"].includes(event)) return;
             if (event === "assign-register" && value && typeof value === "object") {
                 const register = Number(value.register);
                 const cardId = String(value.cardId || "");
@@ -2270,7 +2425,8 @@ function init(wsServer, gamePath) {
                     player.lockedRegisters.includes(register) ? cardId : available.shift() || null);
                 return this.update();
             }
-            if (event === "lock-program" && player.selected.every(Boolean)) {
+            if (event === "lock-program" && (player.selected.every(Boolean)
+                || (this.room.activePowerDownMode === "simple" && player.powerDownIntent))) {
                 player.locked = true;
                 player.autoFilledRegisters = [];
                 this.addLog(`${this.playerName(userId)} готов.`);

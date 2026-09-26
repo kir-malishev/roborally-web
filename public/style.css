@@ -255,7 +255,8 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
 .course-card span, .course-card small { color: #b6c9d5; }
 .course-card.recommended { border-color: #5ca46f; }
 .course-card.selected { background: #815d1e; border-color: #f4bd42; }
-.course-card { position: relative; overflow: visible; }.course-card:hover,.course-card:focus-within { z-index: 8; }.special-rule-marker { position: relative; align-self: flex-start; display: inline-flex; align-items: center; width: max-content; margin-top: 2px; padding: 3px 7px; border: 1px solid #e5ae48; border-radius: 10px; color: #241707 !important; background: #f0bd54; font-size: .65rem; line-height: 1; font-weight: 900; letter-spacing: .025em; cursor: help; overflow: visible !important; }.special-rule-marker::before { content: "⚙"; margin-right: 4px; }.special-rule-tooltip { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 7px); display: block; width: min(290px,70vw); padding: 8px 10px; border: 1px solid #e7bd66; border-radius: 7px; color: #eef5f8 !important; background: rgba(12,20,26,.97); box-shadow: 0 7px 22px #000d; font-size: .74rem; font-weight: 500; line-height: 1.3; white-space: normal; opacity: 0; visibility: hidden; transform: translateY(4px); transition: opacity .15s,transform .15s; pointer-events: none; }.special-rule-marker:hover .special-rule-tooltip,.special-rule-marker:focus .special-rule-tooltip { opacity: 1; visibility: visible; transform: none; }
+.course-card { position: relative; overflow: visible; }.course-card:hover,.course-card:focus-within { z-index: 8; }.special-rule-marker { position: relative; align-self: flex-start; display: inline-flex; align-items: center; width: max-content; margin-top: 2px; padding: 3px 7px; border: 1px solid #e5ae48; border-radius: 10px; color: #241707 !important; background: #f0bd54; font-size: .65rem; line-height: 1; font-weight: 900; letter-spacing: .025em; cursor: help; overflow: visible !important; }.special-rule-marker::before { content: "⚙"; margin-right: 4px; }
+.rr-special-rule-popover { box-sizing: border-box; position: fixed; z-index: 1000; width: min(300px,calc(100vw - 20px)); max-height: calc(100vh - 20px); overflow-y: auto; padding: 9px 11px; border: 1px solid #e7bd66; border-radius: 7px; color: #eef5f8; background: rgba(12,20,26,.98); box-shadow: 0 7px 22px #000d; font: 500 .76rem/1.35 Inter,Arial,sans-serif; overflow-wrap: break-word; pointer-events: none; }
 .course-thumbnail { position: relative; display: block; width: 88px; aspect-ratio: 3 / 4; overflow: hidden; border-radius: 5px; background: #68737b; box-shadow: 0 2px 7px #0008; }.course-thumbnail img, .large-course-preview img { position: absolute; left: 0; width: 100%; display: block; object-fit: fill; }.course-thumbnail-factory { top: 0; height: 75%; transform-origin: center; }.course-thumbnail-start { top: 75%; height: 25%; }.course-thumbnail i { position: absolute; transform: translate(-50%,-50%); display: grid; place-items: center; width: 11px; height: 11px; border-radius: 50%; color: #132019; background: #6fe45d; border: 1px solid #fff; font-size: 7px; font-style: normal; font-weight: 900; box-shadow: 0 1px 2px #000; }
 .selected-course-preview { margin-top: 12px; border: 1px solid #526a79; border-radius: 8px; background: #111c24; overflow: hidden; }.selected-course-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 10px; }.selected-course-heading > div { display: grid; gap: 2px; }.selected-course-heading span { color: #aebfca; font-size: .78rem; }.selected-course-heading button { padding: 5px 8px; font-size: .76rem; }.selected-course-body { display: flex; justify-content: center; align-items: start; gap: 14px; padding: 0 10px 11px; border-top: 1px solid #ffffff14; }.selected-course-body.has-special-rules { display: grid; grid-template-columns: minmax(280px,420px) minmax(220px,360px); }.large-course-preview { position: relative; width: min(100%, 420px); aspect-ratio: 3 / 4; margin: 10px auto 0; overflow: hidden; border: 2px solid #718896; border-radius: 7px; background: #68737b; box-shadow: 0 5px 18px #0008; }.large-preview-flag { position: absolute; transform: translate(-50%,-50%); display: grid; place-items: center; width: 5.2%; aspect-ratio: 1; border-radius: 50%; color: #132019; background: #70df5e; border: max(1px, .08cqw) solid #fff; font-size: clamp(9px,1vw,14px); font-style: normal; font-weight: 900; box-shadow: 0 1px 3px #000; z-index: 2; }.selected-course-special-rules { margin-top: 10px; padding: 12px; border: 1px solid #dba747; border-radius: 8px; color: #dce8ee; background: #2c2417; box-shadow: 0 4px 15px #0006; }.selected-course-special-rules strong { display: block; margin-bottom: 6px; color: #ffd36e; letter-spacing: .035em; }.selected-course-special-rules p { margin: 0; font-size: .82rem; line-height: 1.4; }
 .selected-course-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
@@ -315,7 +316,6 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
 .course-fit, .course-selected-badge { align-self: auto; margin: 0; padding: 2px 5px; border-radius: 8px; font-size: .57rem; line-height: 1.12; }
 .course-selected-badge { color: #241805; background: #f0c25c; }
 .course-card .special-rule-marker { margin: 0; padding: 2px 5px; font-size: .56rem; }
-.course-card .special-rule-tooltip { left: auto; right: 0; bottom: calc(100% + 5px); }
 .course-empty { grid-column: 1; margin: 20px; color: #9fb1bc; text-align: center; }
 .selected-course-preview { min-width: 0; margin: 0; overflow: hidden; border-color: #465f70; }
 .selected-course-heading { min-height: 54px; padding: 8px 10px; border-bottom: 1px solid #ffffff14; }
@@ -516,7 +516,7 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
 .bottom-dock.rr-dock-expired .bottom-dock-toggle { border-color: #ffaaa3; color: #fff5f3; background: linear-gradient(180deg,rgba(190,48,41,.99),rgba(119,24,23,.99)); box-shadow: 0 0 19px rgba(255,59,52,.5); }
 .bottom-dock.rr-dock-warning .bottom-dock-toggle { animation: rr-dock-warning-pulse .82s ease-in-out infinite; }
 .bottom-dock.rr-dock-expired { border-color: rgba(255,103,70,.95); box-shadow: 0 8px 30px #000b, 0 0 24px rgba(255,71,39,.42); }
-.bottom-dock.rr-dock-programming:not(.collapsed) .bottom-dock-toggle { position: absolute; z-index: 2; top: 9px; left: 50%; align-self: auto; margin: 0; transform: translateX(-50%); border-radius: 7px; }
+.bottom-dock.rr-dock-programming:not(.collapsed) .bottom-dock-toggle { position: static; z-index: 2; align-self: center; max-width: calc(100% - 16px); margin: 5px auto 0; transform: none; border-radius: 7px; }
 .bottom-dock.collapsed.rr-dock-programming .bottom-dock-toggle { margin: 0; border-width: 1px; border-style: solid; border-radius: 8px; }
 .bottom-dock.rr-phase-cue-active { animation: rr-dock-phase-arrival 1.25s ease-out both; }
 .bottom-dock.rr-timer-cue-active { animation: rr-dock-timer-arrival 1.55s ease-out both; }
@@ -538,9 +538,48 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
     0%,100% { filter: brightness(1); box-shadow: 0 0 15px rgba(255,59,52,.42); }
     50% { filter: brightness(1.28); box-shadow: 0 0 26px rgba(255,59,52,.78); }
 }
-@media (max-width: 760px) {
-    .bottom-dock.rr-dock-programming:not(.collapsed) .bottom-dock-toggle { top: 6px; left: 9px; max-width: calc(100% - 202px); transform: none; }
-    .bottom-dock.rr-dock-programming:not(.collapsed) .program-heading > div:first-child { visibility: hidden; }
+/* The lobby action column can be narrow even on a wide viewport. */
+.lobby-intro { container: rr-lobby-intro / inline-size; min-width: 0; }
+.lobby-intro-title > div { min-width: 0; }
+.lobby-intro h2 { overflow-wrap: anywhere; }
+.lobby-primary-actions, .role-actions, .lobby-start { min-width: 0; }
+.role-actions button, .lobby-start button, .lobby-start-placeholder { height: auto; min-height: 44px; overflow-wrap: break-word; }
+.role-actions button { white-space: normal; }
+@container rr-lobby-intro (max-width: 560px) {
+    .lobby-primary-actions { grid-template-columns: minmax(0,1fr); }
+    .role-actions { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .role-actions button, .lobby-start button, .lobby-start-placeholder { min-height: 52px; }
+}
+@container rr-lobby-intro (max-width: 340px) {
+    .lobby-intro-title { flex-wrap: wrap; }
+    .lobby-intro .lobby-guide-button { min-width: 0; }
+}
+@media (max-width: 960px) {
+    .lobby-shell { grid-template-columns: minmax(0,1fr); }
+    .lobby-members, .course-setup { grid-column: 1; }
+}
+.course-preview-group { min-width: 0; }
+.course-start-controls { width: min(100%,350px); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 9px auto 2px; }
+.course-start-list { min-width: 0; display: flex; flex: 1 1 150px; flex-wrap: wrap; justify-content: center; gap: 5px; }
+.course-start-chip { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; border: 1px solid #526a78; border-radius: 15px; color: #dce9ed; background: #1b2b35; font-size: .7rem; }
+.course-start-chip i { width: 11px; height: 11px; flex: none; border: 1px solid #fff9; border-radius: 50%; }
+.course-start-chip b { color: #ffe09a; }
+.course-start-chip span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.course-start-empty { color: #9fb2bd; font-size: .7rem; text-align: center; }
+.course-start-controls > button { flex: 0 1 auto; min-width: 0; padding: 6px 8px; font-size: .7rem; white-space: normal; }
+.bottom-dock-scroll { container: rr-dock / inline-size; }
+.program-heading > div:first-child { min-width: 0; }
+.program-actions { min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+.registers { grid-template-columns: repeat(5,minmax(0,1fr)); }
+.register { min-width: 0; }
+.register span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@container rr-dock (max-width: 620px) {
+    .rr-playing .program-heading { flex-direction: column; align-items: stretch; }
+    .rr-playing .program-actions { justify-content: flex-end; }
+    .rr-playing .registers { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@container rr-dock (max-width: 340px) {
+    .rr-playing .registers { grid-template-columns: minmax(0,1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
     .conveyor-demo-good-robot { animation: none; transform: translate(250px,70px); }
@@ -549,4 +588,81 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
     .conveyor-demo-turn-mark, .conveyor-demo-no-turn { animation: none; opacity: 1; }
     .bottom-dock.rr-phase-cue-active, .bottom-dock.rr-timer-cue-active,
     .bottom-dock.rr-dock-warning .bottom-dock-toggle, .is-history-playing .board-viewport { animation: none; }
+}
+
+/* Compact room options are shared by lobby and in-game HUD. */
+.lobby-shell > .rr-game-options { grid-column: 1 / -1; min-width: 0; }
+.rr-game-options { min-width: 0; padding: 0; }
+.rr-game-options > summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 3px 12px; padding: 10px 12px; cursor: pointer; }
+.rr-game-options > summary strong { font-size: .85rem; }
+.rr-game-options > summary span { min-width: 0; color: #bad1da; font-size: .68rem; overflow-wrap: anywhere; }
+.rr-game-options-body { display: grid; gap: 7px; padding: 1px 12px 12px; }
+.rr-option-row { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 7px; border-top: 1px solid #ffffff16; padding-top: 7px; }
+.rr-option-name { display: flex; align-items: center; gap: 5px; font-size: .77rem; }
+.rr-option-help { color: #87bbc9; cursor: help; }
+.rr-option-help:focus-visible { outline: 2px solid #88d4dc; border-radius: 3px; }
+.rr-option-number, .rr-option-modes { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; }
+.rr-option-number input { width: 64px; min-width: 0; padding: 5px 6px; border: 1px solid #657d89; border-radius: 6px; color: #effaff; background: #101c25; }
+.rr-option-number > span, .rr-option-value { color: #d8e9ed; font-size: .74rem; }
+.rr-option-number button, .rr-option-modes button, .rr-option-switch { padding: 5px 8px; border-radius: 6px; font-size: .72rem; }
+.rr-option-number button.selected, .rr-option-modes button.selected, .rr-option-switch.selected { border-color: #58d4ba; color: #ecfffa; background: #176856; }
+.rr-options-effective { margin: 2px 0 0; color: #a9bec8; font-size: .65rem; }
+.player-name-status.finished { color: #f5edce; background: #756124; border-color: #dcb85f; }
+.rr-host-lives { min-width: 0; display: inline-flex; align-items: center; gap: 4px; }
+.rr-host-lives > button.player-stat { border-color: #b18c4c; background: #28301f; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s; }
+.rr-host-lives > button.player-stat:hover, .rr-host-lives > button.player-stat:focus-visible { border-color: #f4ca75; background: #494126; box-shadow: 0 0 0 2px #e4b75d55; }
+.rr-lives-pencil { color: #f3c978; font-size: .82rem; line-height: 1; }
+.rr-host-lives:has(.rr-lives-inline-edit) { grid-column: 2 / -1; justify-self: end; }
+.rr-lives-inline-edit { border-color: #f4ca75; background: #333420; }
+.rr-host-lives input { width: 42px; padding: 2px 3px; border: 0; border-bottom: 1px solid #d4b56f; color: #fff; background: transparent; text-align: center; font-size: .72rem; }
+.rr-host-lives input[aria-invalid="true"] { border-bottom-color: #ff7777; outline-color: #ff7777; }
+.rr-host-lives .rr-lives-inline-edit button { padding: 2px 5px; font-size: .68rem; }
+.lobby-intro-links { min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.lobby-intro .lobby-settings-button { min-width: 0; height: 44px; padding: 7px 10px; font-size: .78rem; }
+.game-pause-controls { flex-wrap: wrap; }
+.rr-settings-backdrop { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; padding: 12px; background: rgba(3,9,13,.78); }
+.rr-settings-modal { width: min(530px,100%); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 0; box-shadow: 0 20px 70px #000c; }
+.rr-settings-modal > header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #ffffff24; background: #15242d; }
+.rr-settings-modal > header h2 { margin: 0; font-size: 1rem; }
+.rr-settings-close { min-width: 34px; min-height: 34px; padding: 2px; font-size: 1.25rem; }
+.rr-settings-modal .rr-game-options-body { padding: 8px 14px 14px; }
+
+/* Let the compact dock fit its content before introducing a vertical scrollbar. */
+.roborally-app.rr-playing { padding-bottom: 16px; }
+.rr-playing .game-screen { padding-bottom: 24px; }
+.rr-playing .game-screen:has(.bottom-dock) { padding-bottom: var(--rr-dock-reserved-space, 240px); }
+.rr-playing .bottom-dock { max-height: min(430px,calc(100dvh - 150px)); }
+.rr-playing .bottom-dock .program { padding: 8px; }
+.rr-playing .program-heading { gap: 8px; }
+.rr-playing .power-down-token { width: 60px; height: 60px; flex-basis: 60px; padding: 5px; }
+.rr-playing .power-down-token span { font-size: 9px; letter-spacing: 0; white-space: nowrap; }
+.rr-playing .registers { margin-block: 5px; padding-block: 3px; }
+.rr-playing .register { min-height: 36px; }
+.rr-playing .card { min-height: 68px; }
+.rr-playing .bottom-dock-scroll { overflow-x: hidden; overflow-y: auto; scrollbar-gutter: auto; }
+
+/* A stacked pause notice reads cleanly at desktop and mobile widths. */
+.pause-banner, .pause-banner.history { width: min(440px,calc(100vw - 340px)); display: grid; justify-items: center; gap: 2px; padding: 10px 14px; text-align: center; }
+.pause-banner strong { white-space: normal; color: #a9daf3; font-size: .7rem; line-height: 1.2; letter-spacing: .09em; text-transform: uppercase; }
+.pause-banner span, .pause-banner.history span { min-width: 0; color: #f0f8fc; font-size: 1rem; font-weight: 800; line-height: 1.25; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.pause-banner small { max-width: 100%; color: #bed9e8; font-size: .72rem; line-height: 1.3; overflow-wrap: anywhere; }
+.pause-banner.history { width: min(540px,calc(100vw - 340px)); }
+.pause-banner.history strong { color: #f8d990; }
+.pause-banner.history small { color: #f1d59f; }
+@media (max-width: 1050px) and (min-width: 761px) {
+    .rr-playing .cards { display: flex; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+    .rr-playing .card { flex: 0 0 108px; }
+}
+@media (max-width: 760px) {
+    .rr-playing .bottom-dock { max-height: min(390px,calc(100dvh - 125px)); }
+    .rr-playing .power-down-token { width: 52px; height: 52px; flex-basis: 52px; padding: 4px; }
+    .rr-playing .power-down-token span { font-size: 7.5px; }
+    .pause-banner, .pause-banner.history { width: min(440px,calc(100vw - 18px)); }
+}
+@container rr-dock (max-width: 340px) {
+    .rr-playing .registers { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 540px) {
+    .rr-game-options > summary { align-items: flex-start; flex-direction: column; }
+    .rr-option-row { align-items: flex-start; }
 }

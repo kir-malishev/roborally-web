@@ -369,7 +369,35 @@ function LaserEffects({shots = [], robots = [], replayKey = "live"}) {
     </svg>;
 }
 
-function PlayerPanel({state}) {
+function HostLivesEditor({userId, lives, app}) {
+    const [draft, setDraft] = React.useState(lives === null ? "∞" : String(lives));
+    const [editing, setEditing] = React.useState(false);
+    React.useEffect(() => setDraft(lives === null ? "∞" : String(lives)), [lives]);
+    const trimmed = draft.trim();
+    const valid = trimmed === "∞" || (/^[1-9]\d*$/.test(trimmed) && Number.isSafeInteger(Number(trimmed)));
+    const commit = () => {
+        const next = trimmed === "∞" ? null : Number(trimmed);
+        if (valid) {
+            app.socket.emit("set-player-lives", {userId, lives: next});
+            setEditing(false);
+        }
+    };
+    return <span className="rr-host-lives">
+        {editing ? <span className="player-stat lives rr-lives-inline-edit">
+            <i aria-hidden="true">♥</i>
+            <input aria-label={`Новое число жизней: ${userId}`} title="Положительное число или ∞" aria-invalid={!valid} inputMode="numeric" autoFocus value={draft}
+                onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
+                    if (event.key === "Enter") commit();
+                    if (event.key === "Escape") setEditing(false);
+                }}/>
+            <button type="button" aria-label="Сохранить жизни" title={valid ? "Сохранить жизни" : "Введите число от 1 или ∞"} disabled={!valid} onClick={commit}>✓</button>
+        </span> : <button type="button" className="player-stat lives" aria-label={`Оставшиеся жизни: ${lives === null ? "бесконечно" : lives}. Изменить`}
+            title="Изменить жизни робота" aria-expanded={editing} onClick={() => setEditing(!editing)}>
+            <i aria-hidden="true">♥</i><b>{lives === null ? "∞" : lives}</b><span className="rr-lives-pencil" aria-hidden="true">✎</span></button>}
+    </span>;
+}
+
+function PlayerPanel({state, app}) {
     const robotsByUser = {};
     state.robots.forEach((robot) => robotsByUser[robot.userId] = robot);
     const displayedStats = state.historyReview && !state.historyReview.actual
@@ -379,14 +407,16 @@ function PlayerPanel({state}) {
         {state.playerSlots.filter(Boolean).map((userId) => {
             const robot = robotsByUser[userId] || {};
             const stats = (displayedStats && displayedStats[userId]) || {};
-            const status = stats.poweredDown ? "powered-down"
+            const status = stats.finished ? "finished"
+                : stats.poweredDown ? "powered-down"
                 : stats.powerDownNextRound ? "power-down-next"
                 : state.phase === "programming" && stats.ready ? "ready" : "";
-            const statusTitle = status === "powered-down" ? "Робот находится в Power Down"
+            const statusTitle = status === "finished" ? "Робот собрал все флаги и завершил заезд"
+                : status === "powered-down" ? "Робот находится в Power Down"
                 : status === "power-down-next" ? "Робот отключится в следующем раунде"
                 : status === "ready" ? "Игрок закончил программирование" : "";
             return <div className="player-row" key={userId}>
-                <i style={{background: robot.color}}></i>
+                <i style={{background: robot.color || state.playerColors[userId]}}></i>
                 <div className="player-identity"><span className={`${userId === state.userId ? "own-player-name" : "player-name"} player-name-status ${status}`}
                     title={statusTitle || undefined}>{playerName(state, userId)}</span>
                     <MemberHostControls state={state} userId={userId}/></div>
@@ -394,9 +424,13 @@ function PlayerPanel({state}) {
                     <i aria-hidden="true">⚑</i><b>{stats.checkpoints || 0}/{state.flags.length}</b></span>
                 <span className="player-stat damage" title="Повреждения" aria-label={`Повреждения: ${stats.damage || 0}`}>
                     <i aria-hidden="true">⚡</i><b>{stats.damage || 0}</b></span>
-                <span className="player-stat lives" title="Оставшиеся жизни" aria-label={`Оставшиеся жизни: ${stats.lives == null ? 0 : stats.lives}`}>
-                    <i aria-hidden="true">♥</i><b>{stats.lives == null ? 0 : stats.lives}</b></span>
-                {stats.poweredDown ? <small>POWER DOWN</small> : stats.powerDownNextRound ? <small>POWER DOWN · следующий раунд</small> : null}
+                {state.userId === state.hostId && state.phase !== "finished" && state.gameOptions?.startingLives !== null
+                    && (!state.historyReview || state.historyReview.actual) ?
+                    <HostLivesEditor userId={userId} lives={stats.lives} app={app}/>
+                    : <span className="player-stat lives" title="Оставшиеся жизни" aria-label={`Оставшиеся жизни: ${stats.lives == null ? "бесконечно" : stats.lives}`}>
+                        <i aria-hidden="true">♥</i><b>{stats.lives == null ? "∞" : stats.lives}</b></span>}
+                {stats.finished ? <small>Финиш · {Math.max(1, (state.finishOrder || []).indexOf(userId) + 1)}</small>
+                    : stats.poweredDown ? <small>POWER DOWN</small> : stats.powerDownNextRound ? <small>POWER DOWN · следующий раунд</small> : null}
             </div>;
         })}
     </section>;
@@ -506,9 +540,12 @@ class GuideModal extends React.Component {
     }
 
     renderHow() {
+        const finishAllFlags = !!this.props.options?.finishAllFlags;
         return <div className="guide-copy guide-how">
             <section className="guide-lead"><div><span className="guide-kicker">Цель игры</span><h3>Доберитесь до всех флагов по порядку</h3>
-                <p>Запрограммируйте робота так, чтобы он активировал флаги от первого до последнего. Побеждает завершивший маршрут; в этой версии также побеждает последний игрок, у которого остались жизни.</p></div>
+                <p>Запрограммируйте робота так, чтобы он активировал флаги от первого до последнего. {finishAllFlags
+                    ? "Финишировавший робот прекращает участие, а остальные могут доиграть маршрут. Первый финишировавший занимает первое место."
+                    : "Побеждает завершивший маршрут."} В этой версии также побеждает последний игрок, у которого остались жизни.</p></div>
                 <GuideToken kind="flag"/></section>
             <div className="guide-rule-grid">
                 <article><b>1</b><h3>Составьте программу</h3><p>Выберите пять карт движения и разложите их в регистры слева направо. До готовности карты можно переставлять и менять местами.</p></article>
@@ -533,16 +570,21 @@ class GuideModal extends React.Component {
     }
 
     renderDamage() {
+        const options = this.props.options || {};
         return <div className="guide-copy guide-damage">
             <section className="guide-damage-scale"><div><b>0</b><span>полная рука<br/><strong>9 карт</strong></span></div><i></i><div><b>5–9</b><span>блокируются регистры<br/><strong>с 5-го к 1-му</strong></span></div><i></i><div className="danger"><b>10</b><span>робот уничтожен<br/><strong>−1 жизнь</strong></span></div></section>
             <div className="guide-rule-grid">
                 <article><h3>Урон и жизнь</h3><p>Каждое повреждение уменьшает руку на одну карту. При 5–9 повреждениях регистры блокируются открытыми картами. При 10 повреждениях, падении в яму или за край робот теряет жизнь.</p></article>
                 <article><h3>Архив и возрождение</h3><p>Робот возвращается перед раздачей карт в последнюю архивную точку с двумя повреждениями. Можно выбрать направление; если точка занята — допустимую соседнюю клетку.</p></article>
                 <article><h3>Ремонт</h3><p>Робот на ключе или флаге сохраняет эту точку как архив и после пятого регистра снимает одно повреждение. Разблокированная карта сбрасывается.</p></article>
-                <article><h3>30-секундный таймер</h3><p>Когда готовыми стали все, кроме одного, последний игрок видит общий таймер. После истечения времени сервер случайно заполняет пустые регистры картами с его руки и фиксирует программу.</p></article>
+                <article><h3>Таймер последнего игрока</h3><p>{options.lastPlayerSeconds === null
+                    ? "Таймер выключен: до готовности всех игроков можно отменить свой ответ и изменить программу. Особый таймер курса действует отдельно."
+                    : `Когда готовыми стали все, кроме одного, запускается таймер на ${options.lastPlayerSeconds || 30} секунд. По истечении сервер случайно заполняет пустые регистры картами с руки.`}</p></article>
             </div>
             <section className="guide-power-down"><div className="guide-power-token"><span>POWER<br/>DOWN</span></div><div><h3>Power Down</h3>
-                <p>Повреждённый робот тайно объявляет отключение вместе с текущей программой. Он полностью исполняет этот раунд и отключается только в следующем.</p>
+                <p>{options.powerDownMode === "simple"
+                    ? "Повреждённый робот выбирает отключение вместо программы и после подтверждения пропускает уже текущий раунд."
+                    : "Повреждённый робот тайно объявляет отключение вместе с текущей программой. Он полностью исполняет этот раунд и отключается только в следующем."}</p>
                 <p>В начале отключённого раунда повреждения снимаются. Робот не получает карты, не исполняет команды и не стреляет, но конвейеры, толкатели, шестерни, стационарные лазеры, столкновения, флаги и ремонт продолжают действовать.</p>
                 <p>После раунда отключённые игроки одновременно решают, проснуться или остаться. Полученный во время отключения урон сохраняется при пробуждении и может заблокировать регистры.</p></div></section>
             <aside className="guide-course-note">Специальные правила выбранного курса могут менять отдельные правила этой памятки.</aside>
@@ -576,16 +618,15 @@ function CourseSpecialRules({course}) {
 function PauseBanner({state}) {
     if (!state.paused) return null;
     const review = state.historyReview || {};
-    if (review.playing) return <section className="pause-banner history" role="status">
-        <strong>Игра на паузе · Воспроизведение журнала</strong>
-        <span>{review.selected ? `Раунд ${review.selected.round} · регистр ${review.selected.register} · ${review.stage || "выполнение"}` : "Подготовка воспроизведения"}</span>
-    </section>;
-    if (!review.actual && review.selected) return <section className="pause-banner history" role="status">
-        <strong>Игра на паузе · Просмотр журнала</strong>
-        <span>{`Раунд ${review.selected.round} · ${review.frameIndex === 0 ? "перед" : "стадия"} регистра ${review.selected.register}${review.stage ? ` · ${review.stage}` : ""}`}</span>
-    </section>;
-    return <section className="pause-banner" role="status">
-        <strong>Игра на паузе · Актуальное состояние</strong><span>Хост может открыть журнал выполненных регистров.</span>
+    const mode = review.playing ? "Воспроизведение журнала"
+        : !review.actual && review.selected ? "Просмотр журнала" : "Актуальное состояние";
+    const detail = review.playing
+        ? review.selected ? `Раунд ${review.selected.round} · регистр ${review.selected.register} · ${review.stage || "выполнение"}` : "Подготовка воспроизведения"
+        : !review.actual && review.selected
+            ? `Раунд ${review.selected.round} · ${review.frameIndex === 0 ? "перед" : "стадия"} регистра ${review.selected.register}${review.stage ? ` · ${review.stage}` : ""}`
+            : "Хост может открыть журнал выполненных регистров.";
+    return <section className={`pause-banner ${review.playing || !review.actual && review.selected ? "history" : ""}`} role="status">
+        <strong>Игра на паузе</strong><span>{mode}</span><small>{detail}</small>
     </section>;
 }
 
@@ -635,6 +676,7 @@ function GamePauseControls({state, app}) {
             onClick={() => app.socket.emit("set-paused", {paused: !state.paused})}>
             {state.paused ? "▶ Продолжить" : "Ⅱ Пауза"}
         </button>
+        {state.paused ? <button type="button" onClick={app.openGameSettings}>⚙ Настройки</button> : null}
     </section>;
 }
 
@@ -755,7 +797,8 @@ class Lobby extends React.Component {
             <section className="lobby-intro rr-panel">
                 <div className="lobby-intro-title"><div><h2>Лобби · {state.roomId}</h2>
                     <p>{isPlayer ? "Вы участвуете в заезде" : "Вы смотрите за подготовкой"}</p></div>
-                    <button type="button" className="lobby-guide-button" onClick={this.props.onOpenGuide}>Как играть</button></div>
+                    <div className="lobby-intro-links"><button type="button" className="lobby-guide-button" onClick={this.props.onOpenGuide}>Как играть</button>
+                    <button type="button" className="lobby-settings-button" onClick={this.props.onOpenSettings}>⚙ Настройки</button></div></div>
                 <div className="lobby-primary-actions"><div className="role-actions" aria-label="Роль в комнате">
                         <button className={`lobby-role-button ${isPlayer ? "primary current-role" : ""}`} disabled={isPlayer || playerCount >= 8}
                             onClick={() => app.socket.emit("join-game")}>
@@ -800,6 +843,118 @@ class Lobby extends React.Component {
     }
 }
 
+class GameOptionNumber extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = {draft: String(props.value == null ? props.fallback : props.value)};
+        this.commit = this.commit.bind(this);
+    }
+
+    componentDidUpdate(previousProps) {
+        if (previousProps.value !== this.props.value && this.props.value !== null)
+            this.setState({draft: String(this.props.value)});
+    }
+
+    commit() {
+        if (!this.props.editable || this.props.value === null) return;
+        const number = Number(this.state.draft);
+        if (Number.isSafeInteger(number) && number > 0) this.props.onChange(number);
+        else this.setState({draft: String(this.props.value)});
+    }
+
+    render() {
+        const {value, fallback, editable, unit, label, onChange} = this.props;
+        if (!editable) return <strong className="rr-option-value">{value === null ? (unit ? "Без таймера" : "∞") : `${value}${unit}`}</strong>;
+        return <span className="rr-option-number">
+            <button type="button" className={value !== null ? "selected" : ""} aria-pressed={value !== null}
+                title={unit ? "Использовать таймер в секундах" : "Использовать ограничение жизней"}
+                onClick={() => {
+                    const draft = Number(this.state.draft);
+                    onChange(Number.isSafeInteger(draft) && draft > 0 ? draft : fallback);
+                }}>{unit ? "Секунды" : "Число"}</button>
+            <input type="number" min="1" step="1" inputMode="numeric" aria-label={label}
+                disabled={value === null} value={this.state.draft}
+                onChange={(event) => this.setState({draft: event.target.value})} onBlur={this.commit}
+                onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()}/>
+            {unit ? <span>{unit}</span> : null}
+            <button type="button" className={value === null ? "selected" : ""} aria-pressed={value === null}
+                title={unit ? "Отключить таймер последнего игрока" : "Сделать жизни бесконечными для всех"}
+                onClick={() => onChange(null)}>{unit ? "Без таймера" : "∞"}</button>
+        </span>;
+    }
+}
+
+function GameSettingsContent({state, app}) {
+    const options = state.gameOptions || {startingLives: 3, lastPlayerSeconds: 30, powerDownMode: "classic", finishAllFlags: false};
+    const editable = state.userId === state.hostId;
+    const setOption = (key, setting) => app.socket.emit("set-game-option", {key, setting});
+    const classicHelp = "Classic: объявите Power Down вместе с программой; текущий раунд выполняется полностью, робот отключится в следующем.";
+    const simpleHelp = "Simple: вместо программы подтвердите Power Down; робот отключится уже в текущем раунде.";
+    return <div className="rr-game-options">
+        <div className="rr-game-options-body">
+            <div className="rr-option-row"><div className="rr-option-name"><strong>Жизни</strong>
+                <span className="rr-option-help" tabIndex="0" title="Число жизней у робота в начале партии. При уменьшении лимита текущие жизни обрезаются; увеличение их не восстанавливает. ∞ сразу даёт всем бесконечные жизни и выключает ручную правку. При числовом лимите хост может менять жизни любого игрока через кнопку ♥." aria-label="Пояснение к числу жизней">ⓘ</span></div>
+                <GameOptionNumber value={options.startingLives} fallback={3} editable={editable} label="Число жизней"
+                    unit="" onChange={(setting) => setOption("startingLives", setting)}/></div>
+            <div className="rr-option-row"><div className="rr-option-name"><strong>Последний игрок</strong>
+                <span className="rr-option-help" tabIndex="0" title="Когда готовыми стали все, кроме одного, запускается этот таймер. Выкл: можно отменять готовность, пока не готовы все. Особый общий таймер курса действует отдельно." aria-label="Пояснение к таймеру">ⓘ</span></div>
+                <GameOptionNumber value={options.lastPlayerSeconds} fallback={30} editable={editable} label="Таймер последнего игрока, секунд"
+                    unit="с" onChange={(setting) => setOption("lastPlayerSeconds", setting)}/></div>
+            <div className="rr-option-row rr-option-power"><div className="rr-option-name"><strong>Power Down</strong>
+                <span className="rr-option-help" tabIndex="0" title={`${classicHelp} ${simpleHelp} Доступен повреждённому роботу.`} aria-label="Пояснение к режимам Power Down">ⓘ</span></div>
+                <div className="rr-option-modes" role="group" aria-label="Режим Power Down">
+                    {["classic", "simple"].map((mode) => <button key={mode} type="button"
+                        className={options.powerDownMode === mode ? "selected" : ""} aria-pressed={options.powerDownMode === mode}
+                        title={mode === "classic" ? classicHelp : simpleHelp} disabled={!editable}
+                        onClick={() => setOption("powerDownMode", mode)}>{mode}</button>)}
+                </div></div>
+            <div className="rr-option-row"><div className="rr-option-name"><strong>Доиграть флаги</strong>
+                <span className="rr-option-help" tabIndex="0" title="После первого финиша остальные роботы продолжают игру. Финишировавший робот больше не участвует. Игра завершится, когда все оставшиеся соберут флаги или останется один выживший." aria-label="Пояснение к доигрыванию флагов">ⓘ</span></div>
+                <div className="rr-option-modes" role="group" aria-label="Завершение игры после флагов">
+                    <button type="button" className={!options.finishAllFlags ? "selected" : ""} aria-pressed={!options.finishAllFlags}
+                        disabled={!editable} onClick={() => setOption("finishAllFlags", false)}>Первый финиш</button>
+                    <button type="button" className={options.finishAllFlags ? "selected" : ""} aria-pressed={!!options.finishAllFlags}
+                        disabled={!editable} onClick={() => setOption("finishAllFlags", true)}>Доиграть всем</button>
+                </div></div>
+            <p className="rr-options-effective">{state.phase === "lobby" ? "Настройки сохраняются для этой комнаты." : "Лимит жизней, таймер и флаги — сразу; режим Power Down — со следующего раунда."}</p>
+        </div>
+    </div>;
+}
+
+function GameSettingsModal({open, state, app, onClose, returnFocus}) {
+    const dialogRef = React.useRef(null);
+    React.useEffect(() => {
+        if (!open) return undefined;
+        const oldOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        const close = dialogRef.current && dialogRef.current.querySelector(".rr-settings-close");
+        if (close) close.focus();
+        const onKeyDown = (event) => {
+            if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+            if (event.key !== "Tab" || !dialogRef.current) return;
+            const elements = [...dialogRef.current.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+            if (!elements.length) return;
+            const first = elements[0];
+            const last = elements[elements.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        };
+        document.addEventListener("keydown", onKeyDown, true);
+        return () => {
+            document.removeEventListener("keydown", onKeyDown, true);
+            document.body.style.overflow = oldOverflow;
+            if (returnFocus && document.contains(returnFocus)) returnFocus.focus();
+        };
+    }, [open, onClose, returnFocus]);
+    if (!open) return null;
+    return <div className="rr-settings-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+        <section className="rr-settings-modal rr-panel" role="dialog" aria-modal="true" aria-labelledby="rr-settings-title" ref={dialogRef}>
+            <header><h2 id="rr-settings-title">Настройки игры</h2><button type="button" className="rr-settings-close" aria-label="Закрыть настройки" onClick={onClose}>×</button></header>
+            <GameSettingsContent state={state} app={app}/>
+        </section>
+    </div>;
+}
+
 function CourseFieldContents({course, state, flagClassName, showLobbyRobots = false}) {
     const assignments = state.startAssignments || {};
     const startPositions = state.startPositions || [];
@@ -829,6 +984,55 @@ function CourseThumbnail({course, state}) {
     return <span className="course-thumbnail">
         <CourseFieldContents course={course} state={state}/>
     </span>;
+}
+
+class SpecialRuleMarker extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = {open: false, left: 10, top: 10, above: false};
+        this.marker = React.createRef();
+        this.show = this.show.bind(this);
+        this.hide = this.hide.bind(this);
+        this.reposition = this.reposition.bind(this);
+    }
+
+    reposition() {
+        if (!this.marker.current) return;
+        const rect = this.marker.current.getBoundingClientRect();
+        const width = Math.min(300, window.innerWidth - 20);
+        this.setState({
+            left: Math.max(10, Math.min(rect.left, window.innerWidth - width - 10)),
+            top: rect.top > window.innerHeight / 2 ? rect.top - 7 : rect.bottom + 7,
+            above: rect.top > window.innerHeight / 2});
+    }
+
+    show() {
+        this.setState({open: true});
+        this.reposition();
+        window.addEventListener("resize", this.reposition);
+        window.addEventListener("scroll", this.reposition, true);
+    }
+
+    hide() {
+        window.removeEventListener("resize", this.reposition);
+        window.removeEventListener("scroll", this.reposition, true);
+        this.setState({open: false});
+    }
+
+    componentWillUnmount() {
+        window.removeEventListener("resize", this.reposition);
+        window.removeEventListener("scroll", this.reposition, true);
+    }
+
+    render() {
+        return <React.Fragment>
+            <span ref={this.marker} className="special-rule-marker" aria-label={`Special Rules: ${this.props.description}`}
+                onMouseEnter={this.show} onMouseLeave={this.hide} onFocus={this.show} onBlur={this.hide}>Special Rules</span>
+            {this.state.open ? ReactDOM.createPortal(<div className="rr-special-rule-popover" role="tooltip"
+                style={{left: this.state.left, top: this.state.top,
+                    transform: this.state.above ? "translateY(-100%)" : "none"}}>{this.props.description}</div>, document.body) : null}
+        </React.Fragment>;
+    }
 }
 
 class CourseSetup extends React.Component {
@@ -884,7 +1088,6 @@ class CourseSetup extends React.Component {
                     <span>{state.course.board} · {state.course.players} игроков · {state.course.length}</span></div>
                 <span className="selected-course-actions">
                     {!inspectedIsSelected ? <button type="button" onClick={() => this.setState({inspectedCourseId: selected})}>Показать выбранный</button> : null}
-                    {!readOnly && playerCount > 1 ? <button type="button" onClick={() => app.socket.emit("shuffle-starts")}>Перемешать старты</button> : null}
                     {readOnly ? <em>Курс выбирает хост</em> : null}
                 </span></div>
             <details className="lobby-fold course-browser" open={this.state.catalogOpen}
@@ -910,17 +1113,29 @@ class CourseSetup extends React.Component {
                                 <small>{course.players} игроков · {course.level}</small>
                                 <span className="course-card-badges">{selected === course.id ? <b className="course-selected-badge">Выбран</b> : null}
                                     <b className={`course-fit ${fits ? "fits" : "not-fit"}`}>{fits ? "Подходит" : course.players}</b>
-                                    {course.specialRules ? <span className="special-rule-marker" title={course.specialRules.description}>Special Rules
-                                        <span className="special-rule-tooltip">{course.specialRules.description}</span>
-                                    </span> : null}</span></span>
+                                    {course.specialRules ? <SpecialRuleMarker description={course.specialRules.description}/> : null}</span></span>
                         </button>;
                     })}{!visibleCourses.length ? <p className="course-empty">Курсы по этому фильтру не найдены.</p> : null}</div>
                     <section className="selected-course-preview" aria-live="polite">
                         <div className="selected-course-heading"><div><small>Просмотр курса</small><strong>{inspectedCourse.name}</strong>
                             <span>{inspectedCourse.board} · {inspectedCourse.players} игроков · {inspectedCourse.level}</span></div></div>
                         <div className={`selected-course-body ${inspectedCourse.specialRules ? "has-special-rules" : ""}`}>
-                            <div className="large-course-preview"><CourseFieldContents course={inspectedCourse} state={state}
-                                flagClassName="large-preview-flag" showLobbyRobots={inspectedIsSelected}/></div>
+                            <div className="course-preview-group">
+                                <div className="large-course-preview"><CourseFieldContents course={inspectedCourse} state={state}
+                                    flagClassName="large-preview-flag" showLobbyRobots={inspectedIsSelected}/></div>
+                                {inspectedIsSelected ? <div className="course-start-controls">
+                                    <div className="course-start-list" aria-label="Стартовые позиции">
+                                        {state.playerSlots.filter(Boolean).map((userId) => <span className="course-start-chip" key={userId}
+                                            title={`${playerName(state, userId)} · старт ${((state.startAssignments || {})[userId] ?? 0) + 1}`}>
+                                            <i style={{background: (state.playerColors || {})[userId] || (state.robotColors || LOBBY_ROBOT_COLORS)[Math.max(0, state.playerSlots.indexOf(userId))]}}/>
+                                            <b>{((state.startAssignments || {})[userId] ?? 0) + 1}</b>
+                                            <span>{playerName(state, userId)}</span>
+                                        </span>)}
+                                        {!playerCount ? <span className="course-start-empty">Стартовые позиции появятся после присоединения игроков.</span> : null}
+                                    </div>
+                                    {!readOnly && playerCount > 1 ? <button type="button" onClick={() => app.socket.emit("shuffle-starts")}>Перемешать старты</button> : null}
+                                </div> : null}
+                            </div>
                             {inspectedCourse.specialRules ? <div className="selected-course-special-rules">
                                 <strong>Special Rules</strong><p>{inspectedCourse.specialRules.description}</p>
                             </div> : null}
@@ -1042,6 +1257,8 @@ function bottomDockProgrammingState(state, isPlayer) {
 
 function Program({state, privateState, app}) {
     if (state.phase !== "programming" || !state.playerSlots.includes(state.userId)) return null;
+    if (privateState.finished) return <section className="program rr-panel"><h2>Вы уже собрали все флаги</h2><p>Ваш робот завершил заезд. Остальные продолжают.</p></section>;
+    if (privateState.lives === 0) return <section className="program rr-panel"><h2>Робот выбыл</h2><p>Хост может вернуть его в игру, выдав жизнь.</p></section>;
     if (privateState.poweredDown) return <section className="program power-down-active rr-panel">
         <PowerDownToken selected confirmed disabled title="Робот находится в Power Down"/>
         <div><h2>Power Down · раунд {state.round}</h2><p>Повреждения сняты. Робот не получает карты и не двигается самостоятельно, но поле продолжает на него воздействовать.</p></div>
@@ -1051,7 +1268,9 @@ function Program({state, privateState, app}) {
     const registerCards = privateState.registerCards || [];
     const lockedRegisters = privateState.lockedRegisters || [];
     const autoFilledRegisters = privateState.autoFilledRegisters || [];
-    const interactionLocked = privateState.locked || state.paused;
+    const simplePowerDown = state.activePowerDownMode === "simple";
+    const interactionLocked = privateState.locked || state.paused || (simplePowerDown && privateState.powerDownIntent);
+    const mayUnlock = privateState.locked && state.gameOptions?.lastPlayerSeconds === null && !state.programmingAutoFill && !state.programmingTimer;
     const drag = (event, payload) => {
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("application/json", JSON.stringify(payload));
@@ -1085,16 +1304,17 @@ function Program({state, privateState, app}) {
                     <PowerDownToken selected={!!privateState.powerDownIntent}
                         confirmed={!!privateState.locked && !!privateState.powerDownIntent}
                         urgent={privateState.damage >= 4} unavailable={!privateState.canPowerDown}
-                        disabled={interactionLocked || !privateState.canPowerDown}
+                        disabled={privateState.locked || state.paused || !privateState.canPowerDown}
                         title={!privateState.canPowerDown ? privateState.powerDownUnavailableReason || "Power Down недоступен"
-                            : privateState.powerDownIntent ? "Отменить Power Down следующего раунда" : "Power Down в следующем раунде"}
+                            : privateState.powerDownIntent ? "Отменить Power Down" : simplePowerDown ? "Power Down в этом раунде вместо программы" : "Power Down в следующем раунде"}
                         onClick={() => app.socket.emit("set-power-down-intent", {enabled: !privateState.powerDownIntent})}/>
                     <small>{!privateState.canPowerDown ? (privateState.powerDownUnavailableReason === "Курс запрещает Power Down" ? "Запрещён курсом" : "Нужен урон")
                         : privateState.locked && privateState.powerDownIntent ? "Объявлено"
-                        : privateState.powerDownIntent ? "Выбрано" : "Следующий раунд"}</small>
+                        : privateState.powerDownIntent ? "Выбрано" : simplePowerDown ? "Этот раунд" : "Следующий раунд"}</small>
                 </div>
-                <button className="primary" onClick={() => app.socket.emit("lock-program")}
-                    disabled={selectedCount !== 5 || interactionLocked}>{privateState.locked ? "Готов ✓" : "Готов"}</button>
+                <button className="primary" onClick={() => app.socket.emit(mayUnlock ? "unlock-program" : "lock-program")}
+                    disabled={state.paused || (privateState.locked ? !mayUnlock : selectedCount !== 5 && !(simplePowerDown && privateState.powerDownIntent))}
+                    title={mayUnlock ? "Отменить готовность и изменить выбор" : undefined}>{privateState.locked ? (mayUnlock ? "Отменить готовность" : "Готов ✓") : "Готов"}</button>
             </div>
         </div>
         <div className="registers" onDragOver={(event) => !interactionLocked && event.preventDefault()}
@@ -1107,7 +1327,7 @@ function Program({state, privateState, app}) {
                     onDragOver={(event) => !interactionLocked && !lockedRegisters.includes(index) && event.preventDefault()}
                     onDrop={(event) => drop(event, index)}
                     onDoubleClick={() => app.socket.emit("clear-register", index)}>
-                    <b>{index + 1}</b><span>{card ? card.label : "—"}</span>
+                    <b>{index + 1}</b><span title={card ? card.label : undefined}>{card ? card.label : "—"}</span>
                     {card ? <small className="priority-badge" title="Приоритет карты">{card.priority}</small> : null}
                     {lockedRegisters.includes(index) ? <em>заблокирован</em> : null}
                 </div>;
@@ -1230,13 +1450,16 @@ class Game extends React.Component {
         const boardHintsEnabled = localStorage.getItem("roborally-board-hints") !== "false";
         this.state = {inited: false, phase: "loading", playerNames: {}, playerSlots: [], robots: [], log: [], flags: [],
             boardScale, boardPanX: 0, boardPanY: 0, boardPanMode: false, boardHintsEnabled,
-            hudCollapsed: window.innerWidth <= 760, bottomDockCollapsed: false, guideOpen: false, conveyorGuideOpen: false,
+            hudCollapsed: window.innerWidth <= 760, bottomDockCollapsed: false, guideOpen: false, conveyorGuideOpen: false, gameSettingsOpen: false,
             programmingCueActive: false, timerCueActive: false};
         this.privateState = {hand: [], selected: [], locked: false};
         this.openGuide = this.openGuide.bind(this);
         this.closeGuide = this.closeGuide.bind(this);
         this.openConveyorGuide = this.openConveyorGuide.bind(this);
         this.closeConveyorGuide = this.closeConveyorGuide.bind(this);
+        this.openGameSettings = this.openGameSettings.bind(this);
+        this.closeGameSettings = this.closeGameSettings.bind(this);
+        this.setBottomDockRef = this.setBottomDockRef.bind(this);
     }
 
     openGuide(event) {
@@ -1255,6 +1478,26 @@ class Game extends React.Component {
 
     closeConveyorGuide() {
         this.setState({conveyorGuideOpen: false});
+    }
+
+    openGameSettings(event) {
+        this.settingsReturnFocus = event && event.currentTarget ? event.currentTarget : document.activeElement;
+        this.setState({gameSettingsOpen: true});
+    }
+
+    closeGameSettings() {
+        this.setState({gameSettingsOpen: false});
+    }
+
+    setBottomDockRef(element) {
+        if (this.bottomDockObserver) this.bottomDockObserver.disconnect();
+        this.bottomDockObserver = null;
+        if (!element) return;
+        const updateReservedSpace = () => element.parentElement?.style.setProperty(
+            "--rr-dock-reserved-space", `${Math.ceil(element.getBoundingClientRect().height) + 16}px`);
+        updateReservedSpace();
+        this.bottomDockObserver = new ResizeObserver(updateReservedSpace);
+        this.bottomDockObserver.observe(element);
     }
 
     setBoardScale(boardScale) {
@@ -1352,6 +1595,7 @@ class Game extends React.Component {
                     ? (timer.paused || state.paused ? "Таймер на паузе · RoboRally" : `${Math.max(0, Number(timer.remaining) || 0)} сек · RoboRally`)
                     : "Программирование · RoboRally";
             } else document.title = "RoboRally";
+            if (state.phase !== "lobby" && !state.paused) localState.gameSettingsOpen = false;
             this.setState({...state, ...localState, userId: this.userId, inited: true});
         });
         this.socket.on("player-state", (playerState) => {
@@ -1366,6 +1610,7 @@ class Game extends React.Component {
     componentWillUnmount() {
         clearTimeout(this.programmingCueTimeout);
         clearTimeout(this.timerCueTimeout);
+        if (this.bottomDockObserver) this.bottomDockObserver.disconnect();
         document.title = "RoboRally";
     }
 
@@ -1389,7 +1634,7 @@ class Game extends React.Component {
                 <div><h1>RoboRally</h1><p>Комната {state.roomId} · {state.phase === "programming" ? "программирование" : state.phase === "resolving" ? "исполнение" : state.phase === "power-down-choice" ? "решение Power Down" : state.phase === "reentry" ? "возрождение" : state.phase === "finished" ? "финиш" : "лобби"}</p></div>
                 {state.userId === state.hostId && state.phase !== "lobby" ? <button onClick={() => this.socket.emit("restart-game")}>В лобби</button> : null}
             </header>
-            {state.phase === "lobby" ? <Lobby state={state} app={this} onOpenGuide={this.openGuide}/> : <div className={`game-screen ${state.paused ? "is-paused" : ""} ${reviewingHistory ? "is-history-review" : ""} ${historyReview.playing ? "is-history-playing" : ""}`}>
+            {state.phase === "lobby" ? <Lobby state={state} app={this} onOpenGuide={this.openGuide} onOpenSettings={this.openGameSettings}/> : <div className={`game-screen ${state.paused ? "is-paused" : ""} ${reviewingHistory ? "is-history-review" : ""} ${historyReview.playing ? "is-history-playing" : ""}`}>
                 <PauseBanner state={state}/>
                 {!isPlayer ? <ProgrammingTimer state={state}/> : null}
                 <section className="game-layout">
@@ -1430,7 +1675,7 @@ class Game extends React.Component {
                         <div className="dock-title"><strong>{state.hudCollapsed ? "Роботы и поле" : `Раунд ${state.round}`}</strong><button type="button" aria-expanded={!state.hudCollapsed} title={state.hudCollapsed ? "Показать панели" : "Свернуть панели"}
                             onClick={() => this.setState({hudCollapsed: !state.hudCollapsed})}>{state.hudCollapsed ? "◀" : "▶"}</button></div>
                         <div className="dock-scroll">
-                        <PlayerPanel state={state}/>
+                        <PlayerPanel state={state} app={this}/>
                         {state.course.specialRules ? <details className="rr-game-disclosure rr-course-rules"><summary>Особые правила · {state.course.name}</summary>
                             <CourseSpecialRules course={state.course}/>
                         </details> : null}
@@ -1468,7 +1713,7 @@ class Game extends React.Component {
                         </div>
                     </aside>
                 </section>
-                {showBottomDock ? <section className={`bottom-dock ${state.bottomDockCollapsed ? "collapsed" : ""} ${dockProgramming.className}${dockCueClasses}`}>
+                {showBottomDock ? <section ref={this.setBottomDockRef} className={`bottom-dock ${state.bottomDockCollapsed ? "collapsed" : ""} ${dockProgramming.className}${dockCueClasses}`}>
                     <button className="bottom-dock-toggle" type="button" onClick={() => this.setState({bottomDockCollapsed: !state.bottomDockCollapsed})}
                         title={state.bottomDockCollapsed ? "Показать игровую панель" : "Свернуть игровую панель"}>
                         <span className="rr-dock-status-text" role="status" aria-live="polite">
@@ -1487,7 +1732,8 @@ class Game extends React.Component {
                     </div>
                 </section> : null}
             </div>}
-            <GuideModal open={state.guideOpen} onClose={this.closeGuide} returnFocus={this.guideReturnFocus}/>
+            <GuideModal open={state.guideOpen} onClose={this.closeGuide} returnFocus={this.guideReturnFocus} options={state.gameOptions}/>
+            <GameSettingsModal open={state.gameSettingsOpen} state={state} app={this} onClose={this.closeGameSettings} returnFocus={this.settingsReturnFocus}/>
             <ConveyorGuideModal open={state.conveyorGuideOpen} onClose={this.closeConveyorGuide} returnFocus={this.conveyorGuideReturnFocus}/>
         </main>
         </React.Fragment>;

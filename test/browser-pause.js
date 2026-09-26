@@ -27,7 +27,7 @@ let browser;
 
     assert.equal(await host.locator(".game-pause-controls").count(), 1, "host pause panel is missing");
     assert.equal(await guest.locator(".game-pause-controls").count(), 0, "guest can see host controls");
-    await host.locator(".game-pause-controls button").click();
+    await host.locator(".game-pause-controls .pause").click();
     await host.locator(".pause-banner").waitFor();
     await guest.locator(".pause-banner").waitFor();
     assert(await host.locator(".game-pause-controls button", {hasText: "Продолжить"}).count());
@@ -36,7 +36,7 @@ let browser;
         "paused programming has no blue dock state");
     assert.equal(await guest.locator(".rr-dock-status-text").innerText(), "ПРОГРАММИРОВАНИЕ НА ПАУЗЕ");
 
-    await host.locator(".game-pause-controls button").click();
+    await host.locator(".game-pause-controls .resume").click();
     await host.locator(".pause-banner").waitFor({state: "detached"});
     await guest.locator(".pause-banner").waitFor({state: "detached"});
     assert(!await guest.locator(".card").first().isDisabled(), "program cards did not unlock after resume");

@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node ../meme-police-sandbox/server.js .",
     "dev": "node --watch ../meme-police-sandbox/server.js .",
-    "test": "node test/sandbox-contract.js && node test/board-integrity.js && node test/board-audit-rotation.js && node test/laser-regression.js && node test/board-events.js && node test/programming-timer.js && node test/special-rules.js && node test/power-down.js && node test/victory.js && node test/pause.js && node test/history-review.js && node test/web-assets.js",
+    "test": "node test/sandbox-contract.js && node test/board-integrity.js && node test/board-audit-rotation.js && node test/laser-regression.js && node test/board-events.js && node test/programming-timer.js && node test/special-rules.js && node test/power-down.js && node test/game-options.js && node test/victory.js && node test/pause.js && node test/history-review.js && node test/web-assets.js",
     "test:hints": "node test/browser-hints.js",
     "test:lobby": "node test/browser-lobby.js",
     "test:lasers": "node test/laser-regression.js",
@@ -23,7 +23,7 @@
     "test:special-rules": "node test/special-rules.js",
     "test:victory": "node test/victory.js",
     "test:pause": "node test/pause.js",
-    "test:browser": "node test/browser-hints.js && node test/browser-lasers.js && node test/browser-lobby.js && node test/browser-power-down.js && node test/browser-board-events.js && node test/browser-programming-timer.js && node test/browser-pause.js && node test/browser-history-review.js && node test/browser-guide.js",
+    "test:browser": "node test/browser-hints.js && node test/browser-lasers.js && node test/browser-lobby.js && node test/browser-power-down.js && node test/browser-board-events.js && node test/browser-programming-timer.js && node test/browser-pause.js && node test/browser-history-review.js && node test/browser-guide.js && node test/browser-layout.js",
     "test:pause:browser": "node test/browser-pause.js",
     "test:assets": "node test/web-assets.js",
     "audit:boards": "node scripts/render-board-audit.js",

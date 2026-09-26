@@ -81,7 +81,7 @@ function recordRegisters(game, round, count, finish = false) {
     assert.notEqual(game.publicState().robots[0].x, 99, "selected history did not replace the public board");
     assert.equal(game.room.robots[0].x, 99, "history selection mutated the canonical robot");
     assert.deepStrictEqual(game.publicState().playerStats.host,
-        {damage: 0, lives: 3, checkpoints: 0, ready: true, poweredDown: false, powerDownNextRound: false},
+        {damage: 0, lives: 3, checkpoints: 0, ready: true, poweredDown: false, powerDownNextRound: false, finished: false},
         "selected history did not restore the public player counters");
     assert.deepStrictEqual(game.publicState().historyReview.playerStats.host,
         game.publicState().playerStats.host, "history review exposed live rather than historical player counters");

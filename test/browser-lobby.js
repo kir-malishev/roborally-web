@@ -25,6 +25,28 @@ async function openUser(id, name) {
     const profileClose = viewer.page.locator(".profile-container-close");
     if (await profileClose.isVisible().catch(() => false)) await profileClose.click();
 
+    await host.page.getByRole("button", {name: "⚙ Настройки"}).click();
+    const settings = host.page.getByRole("dialog", {name: "Настройки игры"});
+    await settings.waitFor();
+    assert.equal(await settings.getByRole("spinbutton", {name: "Число жизней"}).inputValue(), "3");
+    assert.equal(await settings.getByRole("spinbutton", {name: "Таймер последнего игрока, секунд"}).inputValue(), "30");
+    await settings.getByRole("button", {name: "simple"}).click();
+    assert.equal(await settings.getByRole("button", {name: "simple"}).getAttribute("aria-pressed"), "true");
+    await settings.getByRole("button", {name: "classic"}).click();
+    await host.page.setViewportSize({width: 390, height: 760});
+    assert(await settings.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight;
+    }), "game settings modal overflows a narrow viewport");
+    await host.page.setViewportSize({width: 1440, height: 1000});
+    await settings.getByRole("button", {name: "Закрыть настройки"}).click();
+    assert.equal(await host.page.getByRole("dialog", {name: "Настройки игры"}).count(), 0);
+    await viewer.page.getByRole("button", {name: "⚙ Настройки"}).click();
+    assert(await viewer.page.getByRole("dialog", {name: "Настройки игры"}).getByRole("button", {name: "simple"}).isDisabled(),
+        "spectator can edit game settings");
+    await viewer.page.keyboard.press("Escape");
+    await viewer.page.getByRole("dialog", {name: "Настройки игры"}).waitFor({state: "detached"});
+
     const removableRow = host.page.locator(".lobby-member.spectator", {hasText: "Удаляемый"});
     await removableRow.locator('[aria-label="Удалить зрителя"]').click();
     await host.page.locator(".popup_modals .btn_pmry").click();
@@ -37,16 +59,25 @@ async function openUser(id, name) {
     const lobbyActionLayout = async (page) => page.locator(".lobby-intro").evaluate((intro) => {
         const boxes = [...intro.querySelectorAll(".role-actions button, .lobby-start > :first-child")].map((element) => {
             const box = element.getBoundingClientRect();
-            return {top: Math.round(box.top), height: Math.round(box.height)};
+            return {left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+                textFits: element.scrollWidth <= element.clientWidth + 1 && element.scrollHeight <= element.clientHeight + 1};
         });
         return {boxes, columns: getComputedStyle(intro.querySelector(".lobby-primary-actions")).gridTemplateColumns};
     });
+    const assertLobbyActionsFit = (layout, label) => {
+        assert.equal(layout.boxes.length, 3, `${label}: lobby action row is incomplete`);
+        assert(layout.boxes.every(({textFits}) => textFits), `${label}: action button text escapes its button`);
+        for (let index = 0; index < layout.boxes.length; index++)
+            for (let next = index + 1; next < layout.boxes.length; next++) {
+                const left = layout.boxes[index], right = layout.boxes[next];
+                assert(left.right <= right.left + 1 || right.right <= left.left + 1
+                    || left.bottom <= right.top + 1 || right.bottom <= left.top + 1,
+                `${label}: lobby action buttons overlap`);
+            }
+    };
     for (const page of [host.page, viewer.page]) {
         const layout = await lobbyActionLayout(page);
-        assert.equal(layout.boxes.length, 3, "Lobby action row is incomplete");
-        assert.equal(new Set(layout.boxes.map(({top}) => top)).size, 1, "Lobby actions are not vertically aligned");
-        assert.equal(new Set(layout.boxes.map(({height}) => height)).size, 1, "Lobby actions use different heights");
-        assert.equal(layout.columns.split(" ").length, 2, "Wide lobby actions do not use a stable two-column layout");
+        assertLobbyActionsFit(layout, "Wide lobby");
     }
     const catalogueMetrics = await viewer.page.locator(".course-list").evaluate((element) => ({
         clientHeight: element.clientHeight,
@@ -89,6 +120,10 @@ async function openUser(id, name) {
     await viewer.page.locator(".selected-course-preview", {hasText: "Moving Targets"}).waitFor();
     assert.equal(await viewer.page.locator(".selected-course-strip strong").innerText(), initialSelectedCourse,
         "Inspecting a course as spectator changed the room selection");
+    await viewer.page.setViewportSize({width: 800, height: 900});
+    assertLobbyActionsFit(await lobbyActionLayout(viewer.page), "800px lobby");
+    assert(await viewer.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+        "800px lobby has horizontal overflow");
     await viewer.page.setViewportSize({width: 460, height: 900});
     const narrowLayout = await viewer.page.locator(".course-browser-layout").evaluate((element) => ({
         columns: getComputedStyle(element).gridTemplateColumns.split(" ").length,
@@ -97,13 +132,37 @@ async function openUser(id, name) {
     }));
     assert.equal(narrowLayout.columns, 1, "Narrow lobby does not stack the catalogue and preview");
     assert(narrowLayout.appWidth <= narrowLayout.viewportWidth + 1, "Narrow lobby has horizontal overflow");
+    assertLobbyActionsFit(await lobbyActionLayout(viewer.page), "460px lobby");
+    await viewer.page.setViewportSize({width: 320, height: 760});
+    assertLobbyActionsFit(await lobbyActionLayout(viewer.page), "320px lobby");
+    assert(await viewer.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+        "320px lobby has horizontal overflow");
     await viewer.page.setViewportSize({width: 1440, height: 1000});
 
     const movingTargets = host.page.locator(".course-card", {hasText: "Moving Targets"});
     await movingTargets.locator(".special-rule-marker").hover();
-    assert(await movingTargets.locator(".special-rule-tooltip").isVisible(), "Special Rules tooltip does not open on hover");
-    assert((await movingTargets.locator(".special-rule-tooltip").innerText()).includes("флаги движутся конвейерами"),
+    const specialRuleTooltip = host.page.locator(".rr-special-rule-popover");
+    assert(await specialRuleTooltip.isVisible(), "Special Rules tooltip does not open on hover");
+    assert((await specialRuleTooltip.innerText()).includes("флаги движутся конвейерами"),
         "Special Rules tooltip has the wrong text");
+    assert(await specialRuleTooltip.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight
+            && element.scrollHeight <= element.clientHeight + 1;
+    }), "Special Rules tooltip is clipped by the course catalogue or viewport");
+    await host.page.setViewportSize({width: 320, height: 760});
+    await movingTargets.locator(".special-rule-marker").hover();
+    const narrowTooltip = await specialRuleTooltip.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return {left: box.left, right: box.right, top: box.top, bottom: box.bottom,
+            viewportWidth: innerWidth, viewportHeight: innerHeight,
+            contentHeight: element.scrollHeight, visibleHeight: element.clientHeight};
+    });
+    assert(narrowTooltip.left >= 0 && narrowTooltip.right <= narrowTooltip.viewportWidth
+        && narrowTooltip.top >= 0 && narrowTooltip.bottom <= narrowTooltip.viewportHeight
+        && narrowTooltip.contentHeight <= narrowTooltip.visibleHeight + 1,
+    `Special Rules tooltip escapes a narrow screen: ${JSON.stringify(narrowTooltip)}`);
+    await host.page.setViewportSize({width: 1440, height: 1000});
     await movingTargets.click();
     await viewer.page.locator(".selected-course-special-rules", {hasText: "флаги движутся конвейерами"}).waitFor();
     assert.equal(await viewer.page.locator(".selected-course-special-rules").count(), 1,
@@ -140,6 +199,10 @@ async function openUser(id, name) {
     const initialStarts = await previewStarts(host.page);
     assert.deepEqual(initialStarts.map(({start}) => start).sort(), [1, 2], "Players received starts outside positions 1–2");
     assert.deepEqual(await previewStarts(viewer.page), initialStarts, "Spectator sees different starting positions");
+    assert.equal(await host.page.locator(".course-start-controls .course-start-chip").count(), 2,
+        "start assignments are not shown next to the course preview");
+    assert.equal(await host.page.locator(".course-start-controls button", {hasText: "Перемешать старты"}).count(), 1,
+        "reshuffle button is not next to the start assignments");
     assert.equal(await guest.page.getByRole("button", {name: "Перемешать старты"}).count(), 0, "Non-host can reshuffle starts");
     await host.page.getByRole("button", {name: "Перемешать старты"}).click();
     await host.page.waitForFunction((before) => {
@@ -204,6 +267,33 @@ async function openUser(id, name) {
 
     await host.page.getByRole("button", {name: "Начать игру"}).click();
     await viewer.page.locator(".board-viewport").waitFor();
+    assert.equal(await host.page.locator(".game-pause-controls").getByRole("button", {name: "⚙ Настройки"}).count(), 0,
+        "settings button is visible outside pause");
+    await host.page.locator(".game-pause-controls .pause").click();
+    await host.page.locator(".game-pause-controls .resume").waitFor();
+    await host.page.locator(".game-pause-controls").getByRole("button", {name: "⚙ Настройки"}).click();
+    await host.page.getByRole("dialog", {name: "Настройки игры"}).waitFor();
+    await host.page.getByRole("button", {name: "Закрыть настройки"}).click();
+    await host.page.getByRole("dialog", {name: "Настройки игры"}).waitFor({state: "detached"});
+    const ownLives = host.page.locator(".players-panel .player-row", {has: host.page.locator(".own-player-name")}).locator(".rr-host-lives");
+    assert((await ownLives.innerText()).includes("✎"), "host's life count has no visible edit affordance");
+    await ownLives.getByRole("button", {name: /Оставшиеся жизни/}).click();
+    await ownLives.getByRole("textbox", {name: /Новое число жизней/}).fill("0");
+    assert(await ownLives.getByRole("button", {name: "Сохранить жизни"}).isDisabled(),
+        "the host could submit zero manual lives");
+    await ownLives.getByRole("textbox", {name: /Новое число жизней/}).fill("4");
+    await ownLives.getByRole("button", {name: "Сохранить жизни"}).click();
+    const hostName = await host.page.locator(".players-panel .own-player-name").innerText();
+    await guest.page.locator(".players-panel .player-row", {hasText: hostName}).locator(".player-stat.lives b").getByText("4").waitFor();
+    await host.page.locator(".game-pause-controls").getByRole("button", {name: "⚙ Настройки"}).click();
+    const livesOption = host.page.locator(".rr-option-row", {has: host.page.getByText("Жизни", {exact: true})});
+    await livesOption.getByRole("button", {name: "∞"}).click();
+    await host.page.locator(".players-panel .own-player-name").locator("..").locator("..").locator(".player-stat.lives b").getByText("∞").waitFor();
+    assert.equal(await host.page.locator(".players-panel .rr-host-lives").count(), 0,
+        "manual life editing remained available with unlimited lives");
+    await livesOption.getByRole("button", {name: "Число"}).click();
+    await host.page.getByRole("button", {name: "Закрыть настройки"}).click();
+    await host.page.locator(".game-pause-controls .resume").click();
     const actualRobotPositions = await viewer.page.locator(".board-overlay .robot").evaluateAll((robots) =>
         Object.fromEntries(robots.map((robot) => [robot.dataset.userId, {left: robot.style.left, top: robot.style.top}])));
     assert.deepEqual(actualRobotPositions, expectedRobotPositions, "Game did not use the shuffled positions shown in the lobby preview");
@@ -248,7 +338,8 @@ async function openUser(id, name) {
         "programming indicator protrudes outside its panel");
     assert((await host.page.evaluate(({y, height}) => innerHeight - y - height, dockBox)) <= 12,
         "Programming panel is too far from the bottom edge");
-    assert(parseFloat(await host.page.locator(".game-screen").evaluate((element) => getComputedStyle(element).paddingBottom)) <= 260,
+    const reservedSpace = parseFloat(await host.page.locator(".game-screen").evaluate((element) => getComputedStyle(element).paddingBottom));
+    assert(reservedSpace >= dockBox.height && reservedSpace <= dockBox.height + 20,
         "Programming panel reserves too much empty page space");
     assert((await host.page.locator(".bottom-dock").evaluate((element) => getComputedStyle(element).backgroundColor)).includes("0.78"), "Programming panel is not translucent");
     await host.page.setViewportSize({width: 390, height: 760});
@@ -265,6 +356,26 @@ async function openUser(id, name) {
     "programming indicator escapes the panel on a narrow screen");
     assert(narrowDockLayout.toggle.right <= narrowDockLayout.actions.left || narrowDockLayout.toggle.bottom <= narrowDockLayout.actions.top
         || narrowDockLayout.toggle.top >= narrowDockLayout.actions.bottom, "programming indicator overlaps the action buttons on a narrow screen");
+    await host.page.setViewportSize({width: 320, height: 760});
+    const compactDockLayout = await host.page.locator(".bottom-dock").evaluate((dock) => {
+        const inside = (element) => {
+            const box = element.getBoundingClientRect();
+            const dockBox = dock.getBoundingClientRect();
+            return box.left >= dockBox.left - 1 && box.right <= dockBox.right + 1;
+        };
+        const toggle = dock.querySelector(".bottom-dock-toggle");
+        const heading = dock.querySelector(".program-heading");
+        return {toggleInside: inside(toggle), headingInside: inside(heading),
+            noOverlap: toggle.getBoundingClientRect().bottom <= heading.getBoundingClientRect().top + 1,
+            actionTextFits: [...dock.querySelectorAll(".program-actions button")]
+                .every((button) => button.scrollWidth <= button.clientWidth + 1 && button.scrollHeight <= button.clientHeight + 1),
+            registersFit: dock.querySelector(".registers").scrollWidth <= dock.querySelector(".registers").clientWidth + 1};
+    });
+    assert(Object.values(compactDockLayout).every(Boolean),
+        `320px programming panel overflows or overlaps: ${JSON.stringify(compactDockLayout)}`);
+    assert(await host.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+        "320px game screen has horizontal overflow");
+    await host.page.setViewportSize({width: 390, height: 760});
     await host.page.locator(".bottom-dock-toggle").click();
     assert.equal(await host.page.locator(".rr-dock-status-text").innerText(), "ПРОГРАММИРОВАНИЕ · РАУНД 1",
         "collapsed narrow panel loses its phase indicator");

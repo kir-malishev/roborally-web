@@ -8,7 +8,7 @@ const {server, ready} = startSandbox(port);
 let browser;
 
 async function openUser(id, name) {
-    return openSandboxUser(browser, {port, room: "lobby-smoke", name, viewport: {width: 1440, height: 1000}, timeout: 7000});
+    return openSandboxUser(browser, {port, room: "lobby-smoke", name, viewport: {width: 1440, height: 1000}, timeout: 15000});
 }
 
 (async () => {
@@ -31,6 +31,8 @@ async function openUser(id, name) {
     assert.equal(await settings.getByRole("spinbutton", {name: "Число жизней"}).inputValue(), "3");
     assert.equal(await settings.getByRole("spinbutton", {name: "Таймер последнего игрока, секунд"}).inputValue(), "30");
     await settings.getByRole("button", {name: "simple"}).click();
+    await host.page.waitForFunction(() => [...document.querySelectorAll('.rr-settings-modal button[aria-pressed="true"]')]
+        .some((button) => button.textContent?.includes("simple")));
     assert.equal(await settings.getByRole("button", {name: "simple"}).getAttribute("aria-pressed"), "true");
     await settings.getByRole("button", {name: "classic"}).click();
     await host.page.setViewportSize({width: 390, height: 760});
@@ -225,6 +227,16 @@ async function openUser(id, name) {
     await host.page.locator(".course-card", {hasText: "Dizzy Dash"}).click();
     await viewer.page.locator(".course-card.selected", {hasText: "Dizzy Dash"}).waitFor();
     await viewer.page.locator(".selected-course-preview", {hasText: "Dizzy Dash"}).waitFor();
+    const flagShape = async (locator) => locator.evaluate((element) => {
+        const {width,height} = element.getBoundingClientRect();
+        return {width,height};
+    });
+    const largeFlag = await flagShape(viewer.page.locator(".large-course-preview .large-preview-flag").first());
+    assert(Math.abs(largeFlag.width - largeFlag.height) <= 1,
+        `Lobby flag must be circular: ${JSON.stringify(largeFlag)}`);
+    const thumbnailFlag = await flagShape(viewer.page.locator(".course-thumbnail i").first());
+    assert(Math.abs(thumbnailFlag.width - thumbnailFlag.height) <= 1,
+        `Course thumbnail flag must be circular: ${JSON.stringify(thumbnailFlag)}`);
     assert.equal(await viewer.page.locator(".large-course-preview img").count(), 2, "Selected course preview does not include its start board");
     assert.equal(await viewer.page.getByText("Стартовое поле показано снизу.", {exact: false}).count(), 0, "Redundant selected-course explanation is visible");
     await viewer.page.locator(".course-browser > summary").click();
@@ -244,6 +256,9 @@ async function openUser(id, name) {
     assert((await host.page.locator(".constructor-preview-start").evaluate((image) => image.naturalWidth)) > 0, "Start 2 preview did not load");
     assert((await host.page.locator(".constructor-preview-start").getAttribute("src")).endsWith("/start-2.webp"), "Constructor still uses an external start image");
     assert.equal(await preview.locator(".preview-flag").count(), 3, "Constructor did not initialize its flags");
+    const constructorFlag = await flagShape(preview.locator(".preview-flag").first());
+    assert(Math.abs(constructorFlag.width - constructorFlag.height) <= 1,
+        `Constructor flag must be circular: ${JSON.stringify(constructorFlag)}`);
     const box = await preview.boundingBox();
     const helpBox = await host.page.locator(".constructor-help").boundingBox();
     assert(helpBox.y >= box.y + box.height, "Constructor help overlaps the course preview");

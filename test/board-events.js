@@ -106,6 +106,39 @@ function makeGame() {
     assert.equal(game.room.boardEvents[0].type, "heal");
 }
 
+// Every flag repairs even when visited out of order and not captured.
+{
+    const {game, robot, player} = makeGame();
+    game.room.flags = [{x: 2, y: 2, number: 1}, {x: 4, y: 5, number: 2}, {x: 6, y: 7, number: 3}];
+    for (const flag of game.room.flags) {
+        robot.x = flag.x;
+        robot.y = flag.y;
+        player.damage = 3;
+        player.checkpointAvailable = 99;
+        game.touchCheckpoints();
+        assert.equal(player.checkpoints, 0, "out-of-order flag was captured");
+        assert.deepStrictEqual(robot.archive, {x: flag.x, y: flag.y});
+        assert.equal(game.cleanupRound(), 1, `flag ${flag.number} did not repair`);
+        assert.equal(player.damage, 2, `flag ${flag.number} repaired more than once`);
+    }
+}
+
+// A flag placed on a wrench tile is still one checkpoint and one repair site.
+{
+    const {game, features, robot, player} = makeGame();
+    robot.x = 4;
+    robot.y = 5;
+    features.repairs.add("4,5");
+    game.room.flags = [{x: 4, y: 5, number: 1}];
+    player.damage = 3;
+    game.touchCheckpoints();
+    assert.equal(player.checkpoints, 1, "repair tile prevented flag capture");
+    assert.deepStrictEqual(robot.archive, {x: 4, y: 5});
+    assert.equal(game.cleanupRound(), 1, "overlapping flag and repair tile did not repair");
+    assert.equal(player.damage, 2, "overlapping flag and repair tile repaired twice");
+    assert.equal(game.room.boardEvents.filter((event) => event.type === "heal").length, 1);
+}
+
 // A pit preserves the death cell, so the effect is drawn on the pit rather than
 // at a stale archive/start position.
 {

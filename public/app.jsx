@@ -13,6 +13,11 @@ function boardImageUrl(state, board) {
     return state.boardImages[board];
 }
 
+function standardBoardName(state, requested) {
+    const boards = Object.keys(state.boardCards || {}).filter((board) => state.boardImages?.[board]);
+    return boards.includes(requested) ? requested : boards[0] || "";
+}
+
 function startImageUrl(state, start) {
     const index = state.startCards.indexOf(start);
     return state.startImages[start] || Object.values(state.startImages)[index];
@@ -97,6 +102,12 @@ function physicalWallId(wall) {
     return `v,${x + 1},${y}`;
 }
 
+function wallBetweenPits(pitCells, wall) {
+    const [xText, yText, direction] = wall.split(",");
+    const x = Number(xText), y = Number(yText), [dx,dy] = FIELD_VECTORS[direction];
+    return pitCells.has(`${x},${y}`) && pitCells.has(`${x+dx},${y+dy}`);
+}
+
 function laserLines(laser, walls) {
     const vector = FIELD_VECTORS[laser.direction];
     const hasWall = (x, y, direction) => {
@@ -152,6 +163,8 @@ class BoardHints extends React.Component {
         const items = [];
         const express = new Set(features.express || []);
         const conveyorDirections = features.conveyors || {};
+        const explicitConnections = features.conveyorConnections === null || features.conveyorConnections === undefined
+            ? null : new Set(features.conveyorConnections);
         const hintConnections = new Set((features.hintConnections || []).map((connection) => connection.split("|").sort().join("|")));
         const conveyorGroups = connectedGroups(Object.keys(conveyorDirections), (left, right) => {
             const [lx, ly] = keyPoint(left);
@@ -161,6 +174,8 @@ class BoardHints extends React.Component {
                 const vector = FIELD_VECTORS[conveyorDirections[from]];
                 return vector && fx + vector[0] === toX && fy + vector[1] === toY;
             };
+            if (explicitConnections && ly < 12 && ry < 12)
+                return explicitConnections.has(`${left}|${right}`) || explicitConnections.has(`${right}|${left}`);
             return flowsTo(left, rx, ry) || flowsTo(right, lx, ly) || hintConnections.has([left, right].sort().join("|"));
         });
         conveyorGroups.forEach((cells, index) => {
@@ -955,15 +970,184 @@ function GameSettingsModal({open, state, app, onClose, returnFocus}) {
     </div>;
 }
 
+const EDITOR_ART = "/roborally/assets/editor/";
+const EDITOR_DIRECTIONS = ["north", "east", "south", "west"];
+const EDITOR_TOOLS = [["conveyor","Конвейер"],["pit","Яма"],["wall","Стена"],["laser","Лазер"],
+    ["pusher","Толкатель"],["gear","Шестерня"],["repair","Ремонт"],["flag","Флаг"],["erase","Ластик"]];
+
+function EditorToolIcon({tool, gearTurn = 1, express = false}) {
+    const sprite = tool === "conveyor" ? (express ? "express-straight" : "belt-straight")
+        : tool === "gear" ? (gearTurn === 1 ? "gear-right" : "gear-left")
+            : tool === "repair" ? "repair" : null;
+    if (sprite) return <span className="rr-editor-tool-icon rr-editor-tool-sprite" aria-hidden="true"
+        style={{backgroundImage: `url(${EDITOR_ART}${sprite}.webp)`}}/>;
+    return <svg className="rr-editor-tool-icon" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+        <rect x="2" y="2" width="36" height="36" rx="3" fill="#9ca8ab" stroke="#d0d5cf" strokeWidth="2"/>
+        {tool === "pit" ? <rect x="4" y="4" width="32" height="32" rx="2" fill="#080b0e"/> : null}
+        {tool === "wall" ? <React.Fragment><path d="M6 7h28" stroke="#2b2a22" strokeWidth="8"/><path d="M6 5h28" stroke="#f4ce4b" strokeWidth="3" strokeDasharray="5 3"/></React.Fragment> : null}
+        {tool === "laser" ? <React.Fragment><path d="M5 7h30" stroke="#242626" strokeWidth="8"/><path d="M7 5h26" stroke="#f7c83d" strokeWidth="2" strokeDasharray="4 3"/><circle cx="20" cy="10" r="4" fill="#f35e5c"/><path d="M20 13v24" stroke="#ff3f46" strokeWidth="2.5"/><path d="M18 13v24" stroke="#ffaaaa" strokeWidth="1"/></React.Fragment> : null}
+        {tool === "pusher" ? <React.Fragment><path d="M6 7h28" stroke="#252720" strokeWidth="8"/><path d="M7 5h26" stroke="#f5c74b" strokeWidth="2" strokeDasharray="4 3"/><path d="M14 13v10h-5l11 10 11-10h-5V13z" fill="#edbd48" stroke="#282421" strokeWidth="2"/></React.Fragment> : null}
+        {tool === "flag" ? <React.Fragment><path d="M13 33V7" stroke="#233132" strokeWidth="3"/><path d="M15 8h19l-5 8 5 8H15z" fill="#7ad864" stroke="#224e31" strokeWidth="2"/><path d="M20 16l7 6m-5-10l6 7" stroke="#20392c" strokeWidth="2" strokeLinecap="round"/><circle cx="13" cy="33" r="3" fill="#243536"/></React.Fragment> : null}
+        {tool === "erase" ? <React.Fragment><path d="M8 25 23 8l11 11-15 16H11z" fill="#e7afa7" stroke="#413a42" strokeWidth="2"/><path d="m15 17 11 11" stroke="#fff1e9" strokeWidth="2"/><path d="M7 35h26" stroke="#46535b" strokeWidth="2"/></React.Fragment> : null}
+    </svg>;
+}
+
+function customCellStyle(x, y, rows = 12) {
+    return {left: `${x / 12 * 100}%`, top: `${y / rows * 100}%`, width: `${100 / 12}%`, height: `${100 / rows}%`};
+}
+
+function conveyorInlets(features, key) {
+    const [x, y] = keyPoint(key);
+    const walls = new Set(features.walls || []);
+    return EDITOR_DIRECTIONS.filter((direction) => {
+        const [dx, dy] = FIELD_VECTORS[direction];
+        const sourceX = x - dx, sourceY = y - dy;
+        const from = `${sourceX},${sourceY}`;
+        if (features.conveyors[from] !== direction) return false;
+        if (features.conveyors[key] === OPPOSITE_DIRECTION[direction]) return false;
+        if (Array.isArray(features.connections) && !features.connections.includes(`${from}|${key}`)) return false;
+        return !walls.has(`${sourceX},${sourceY},${direction}`)
+            && !walls.has(`${x},${y},${OPPOSITE_DIRECTION[direction]}`);
+    });
+}
+
+function conveyorArt(features, key, inbound = conveyorInlets(features, key)) {
+    const outgoing = features.conveyors[key];
+    const incoming = inbound.find((direction) => direction !== outgoing) || inbound[0];
+    const difference = incoming ? (EDITOR_DIRECTIONS.indexOf(outgoing) - EDITOR_DIRECTIONS.indexOf(incoming) + 4) % 4 : 0;
+    const express = (features.express || []).includes(key);
+    const angle = (EDITOR_DIRECTIONS.indexOf(outgoing) - EDITOR_DIRECTIONS.indexOf("east") + 4) % 4 * 90;
+    return {sprite: `${express ? "express" : "belt"}-straight`, transform: `rotate(${angle}deg)`,
+        junction: inbound.length > 1 || difference === 2};
+}
+
+function ConveyorJunctionArt({outgoing, inbound, express, style}) {
+    const out = FIELD_VECTORS[outgoing];
+    const armDirections = [...new Set([...inbound.map((direction) => OPPOSITE_DIRECTION[direction]), outgoing])];
+    const singleTurn = inbound.length === 1 && inbound[0] !== outgoing;
+    const arms = singleTurn ? (() => {
+        const incoming = FIELD_VECTORS[inbound[0]];
+        const start = [50-incoming[0]*50,50-incoming[1]*50];
+        const end = [50+out[0]*50,50+out[1]*50];
+        const controlA = [start[0]+incoming[0]*28,start[1]+incoming[1]*28];
+        const controlB = [end[0]-out[0]*28,end[1]-out[1]*28];
+        return [`M${start.join(" ")} C${controlA.join(" ")} ${controlB.join(" ")} ${end.join(" ")}`];
+    })() : armDirections.map((direction) => {
+        const vector = FIELD_VECTORS[direction];
+        return `M50 50 L${50+vector[0]*50} ${50+vector[1]*50}`;
+    });
+    const join = [50+out[0]*12,50+out[1]*12];
+    const paths = inbound.map((direction) => {
+        const incoming = FIELD_VECTORS[direction];
+        const tail = [50-incoming[0]*37,50-incoming[1]*37];
+        if (direction === outgoing) return `M${tail.join(" ")} L${join.join(" ")}`;
+        const controlA = [tail[0]+incoming[0]*24,tail[1]+incoming[1]*24];
+        const controlB = [join[0]-out[0]*13,join[1]-out[1]*13];
+        return `M${tail.join(" ")} C${controlA.join(" ")} ${controlB.join(" ")} ${join.join(" ")}`;
+    });
+    const shaftEnd = [50+out[0]*34,50+out[1]*34];
+    const side = [-out[1],out[0]];
+    const head = [50+out[0]*42,50+out[1]*42];
+    const wingA = [50+out[0]*30+side[0]*7,50+out[1]*30+side[1]*7];
+    const wingB = [50+out[0]*30-side[0]*7,50+out[1]*30-side[1]*7];
+    return <svg className="rr-custom-tile rr-custom-junction" style={style} viewBox="0 0 100 100" preserveAspectRatio="none">
+        {arms.map((path,index) => <path key={`roller-${index}`} d={path} className="rr-junction-rollers"/>)}
+        {arms.map((path,index) => <path key={`lane-${index}`} d={path} className="rr-junction-lane"/>)}
+        <g className={express ? "express" : ""}>
+            {paths.map((path,index) => <path key={`flow-${index}`} d={path} className="rr-junction-flow"/>)}
+            <path d={`M${join.join(" ")} L${shaftEnd.join(" ")}`} className="rr-junction-flow"/>
+            <polygon points={`${head.join(",")} ${wingA.join(",")} ${wingB.join(",")}`} className="rr-junction-head"/>
+        </g>
+    </svg>;
+}
+
+function CustomFactoryArt({features, starts = []}) {
+    if (!features) return null;
+    const rows = features.fullField ? 16 : 12;
+    const pits = new Set(features.pits || []);
+    const walls = new Set(features.walls || []);
+    const physicalWalls = [...new Map([...walls].map((wall) => [physicalWallId(wall), wall])).values()];
+    const tile = (name, key, transform = "") => {
+        const [x, y] = keyPoint(key);
+        return <img key={`${name}-${key}`} className="rr-custom-tile" draggable="false" alt=""
+            style={{...customCellStyle(x, y, rows), transform}} src={`${EDITOR_ART}${name}.webp`}/>;
+    };
+    return <div className={`rr-custom-factory ${rows === 16 ? "rr-custom-full-field" : ""}`} aria-hidden="true">
+        {rows === 16 ? starts.map(({x,y}, index) => <span key={`start-${index}`}
+            className="rr-custom-start-number" style={customCellStyle(x,y,rows)}><b>{index+1}</b></span>) : null}
+        {(features.pits || []).map((key) => {
+            const [x,y] = keyPoint(key);
+            const border = "max(2px,.28cqw) solid #dfc334";
+            return <div key={`pit-${key}`} className="rr-custom-pit" style={{...customCellStyle(x,y,rows),
+                borderTop: pits.has(`${x},${y-1}`) ? 0 : border,
+                borderRight: pits.has(`${x+1},${y}`) ? 0 : border,
+                borderBottom: pits.has(`${x},${y+1}`) ? 0 : border,
+                borderLeft: pits.has(`${x-1},${y}`) ? 0 : border}}/>;
+        })}
+        {Object.entries(features.conveyors || {}).map(([key]) => {
+            const inbound = conveyorInlets(features, key), art = conveyorArt(features, key, inbound);
+            if (inbound.length && (art.junction || inbound[0] !== features.conveyors[key])) {
+                const [x,y] = keyPoint(key);
+                return <ConveyorJunctionArt key={`junction-${key}`} style={customCellStyle(x,y,rows)}
+                    outgoing={features.conveyors[key]} inbound={inbound} express={(features.express || []).includes(key)}/>;
+            }
+            return tile(art.sprite, key, art.transform);
+        })}
+        {(features.repairs || []).map((key) => tile("repair", key))}
+        {Object.entries(features.gears || {}).map(([key, turn]) => tile(turn === 1 ? "gear-right" : "gear-left", key))}
+        <svg className="rr-custom-lines" viewBox={`0 0 12 ${rows}`} preserveAspectRatio="none">
+            {(features.lasers || []).flatMap((laser, index) => laserLines(laser, walls).map((line, beam) =>
+                <line key={`beam-${index}-${beam}`} className="rr-custom-beam" x1={line[0][0]} y1={line[0][1]} x2={line[1][0]} y2={line[1][1]}/>))}
+            {physicalWalls.map((wall) => {
+                const [x,y,direction] = wall.split(",");
+                const [x1,y1,x2,y2] = wallLine(Number(x), Number(y), direction);
+                return <g key={physicalWallId(wall)}><line className="rr-custom-wall-base" x1={x1} y1={y1} x2={x2} y2={y2}/>
+                    <line className="rr-custom-wall-stripe" x1={x1} y1={y1} x2={x2} y2={y2}/></g>;
+            })}
+        </svg>
+        {(features.lasers || []).map((laser, index) => <span key={`emitter-${index}`} className="rr-custom-emitter"
+            style={{left: `${(laser.x + .5 - FIELD_VECTORS[laser.direction][0] * .43) / 12 * 100}%`,
+                top: `${(laser.y + .5 - FIELD_VECTORS[laser.direction][1] * .43) / rows * 100}%`}}/>)}
+        {(features.pushers || []).map((pusher, index) => {
+            const peers = (features.pushers || []).filter((other) => other !== pusher
+                && other.x === pusher.x && other.y === pusher.y);
+            const hasPeer = (direction) => peers.some((other) => other.direction === direction);
+            const alongWallX = (pusher.direction === "north" || pusher.direction === "south")
+                ? (hasPeer("west") ? -.13 : 0) + (hasPeer("east") ? .13 : 0) : 0;
+            const alongWallY = (pusher.direction === "east" || pusher.direction === "west")
+                ? (hasPeer("north") ? -.13 : 0) + (hasPeer("south") ? .13 : 0) : 0;
+            const consecutive = pusher.active.length >= 4
+                && pusher.active.every((register, position) => register === pusher.active[0] + position);
+            const label = consecutive ? [pusher.active[0], "–", pusher.active.at(-1)] : pusher.active;
+            return <span key={`pusher-${index}`}
+                className={`rr-custom-pusher rr-custom-pusher-${pusher.direction}`}
+                title={`Толкатель: регистры ${pusher.active.join(", ")}`}
+                style={{left: `${(pusher.x + .5 - FIELD_VECTORS[pusher.direction][0] * .29 + alongWallX) / 12 * 100}%`,
+                    top: `${(pusher.y + .5 - FIELD_VECTORS[pusher.direction][1] * .29 + alongWallY) / rows * 100}%`}}>
+                {label.map((register, position) => <span key={position}>{register}</span>)}</span>;
+        })}
+    </div>;
+}
+
+function FlagMarker({number, className = "", style}) {
+    return <span className={`flag ${className}`} style={style}>
+        <span className="flag-cloth">{number}</span><span className="flag-wrench"/>
+    </span>;
+}
+
 function CourseFieldContents({course, state, flagClassName, showLobbyRobots = false}) {
     const assignments = state.startAssignments || {};
     const startPositions = state.startPositions || [];
     const players = (state.playerSlots || []).filter(Boolean);
     return <React.Fragment>
-        <img className="course-thumbnail-factory" draggable="false" style={{transform: `rotate(${course.rotation || 0}deg)`}}
-            src={boardImageUrl(state, course.board)}/>
-        <img className="course-thumbnail-start" draggable="false"
+        {course.customFeatures ? <div className={`course-thumbnail-factory ${course.customFeatures.fullField ? "rr-full-field" : ""}`}>
+            <CustomFactoryArt features={course.customFeatures}
+                starts={(state.startTemplates?.[course.start]?.starts || [])}/></div>
+            : <img className="course-thumbnail-factory" draggable="false" style={{transform: `rotate(${course.rotation || 0}deg)`}}
+                src={boardImageUrl(state, course.board)}/>}
+        {!course.customFeatures?.fullField ? <img className="course-thumbnail-start" draggable="false"
             src={startImageUrl(state, course.start || state.startCards[1])}/>
+            : null}
         {(course.flags || []).map(([x, y], index) => <i className={flagClassName || ""} key={`${x}-${y}-${index}`}
             style={{left: `${(x + .5) / 12 * 100}%`, top: `${(y + .5) / 16 * 100}%`}}>{index + 1}</i>)}
         {showLobbyRobots ? players.map((userId) => {
@@ -1035,12 +1219,656 @@ class SpecialRuleMarker extends React.Component {
     }
 }
 
+function emptyEditableFeatures() {
+    return {fullField: true, pits: [], repairs: [], gears: {}, conveyors: {}, express: [], hintConnections: [], connections: [], walls: [], lasers: [], pushers: []};
+}
+
+function cloneEditableFeatures(features) {
+    return JSON.parse(JSON.stringify(features));
+}
+
+function factoryPart(features) {
+    const onFactory = (key) => keyPoint(key)[1] < 12;
+    return {...emptyEditableFeatures(), pits: features.pits.filter(onFactory), repairs: features.repairs.filter(onFactory),
+        gears: Object.fromEntries(Object.entries(features.gears).filter(([key]) => onFactory(key))),
+        conveyors: Object.fromEntries(Object.entries(features.conveyors).filter(([key]) => onFactory(key))),
+        express: features.express.filter(onFactory),
+        hintConnections: (features.hintConnections || []).filter((entry) => entry.split("|").every(onFactory)),
+        connections: (features.connections || []).filter((entry) => entry.split("|").every(onFactory)),
+        walls: features.walls.filter((entry) => onFactory(entry)),
+        lasers: features.lasers.filter((item) => item.y < 12), pushers: features.pushers.filter((item) => item.y < 12)};
+}
+
+function withEditableStart(factory, startLayout) {
+    const features = cloneEditableFeatures(factory);
+    features.fullField = true;
+    if (!startLayout) return features;
+    features.conveyors = {...features.conveyors, ...startLayout.conveyors};
+    features.express = [...new Set([...features.express, ...startLayout.express])];
+    features.walls = [...new Set([...features.walls, ...startLayout.walls])];
+    Object.entries(features.conveyors).forEach(([from, direction]) => {
+        const [x,y] = keyPoint(from), [dx,dy] = FIELD_VECTORS[direction];
+        const to = `${x+dx},${y+dy}`;
+        if (y < 11 || !features.conveyors[to] || features.conveyors[to] === OPPOSITE_DIRECTION[direction]
+            || features.walls.includes(`${from},${direction}`)
+            || features.walls.includes(`${to},${OPPOSITE_DIRECTION[direction]}`)) return;
+        const connection = `${from}|${to}`;
+        if (!features.connections.includes(connection)) features.connections.push(connection);
+    });
+    return features;
+}
+
+function rotateEditableFactory(features, flags, clockwise) {
+    const amount = clockwise ? 1 : 3;
+    const point = (x,y) => y >= 12 ? [x,y] : clockwise ? [11-y,x] : [y,11-x];
+    const key = (value) => point(...keyPoint(value)).join(",");
+    const direction = (value) => EDITOR_DIRECTIONS[(EDITOR_DIRECTIONS.indexOf(value)+amount)%4];
+    const connection = (value) => value.split("|").map(key).join("|");
+    const sameSection = (value) => {
+        const [from,to] = value.split("|");
+        return (keyPoint(from)[1] < 12) === (keyPoint(to)[1] < 12);
+    };
+    const next = {...cloneEditableFeatures(features),
+        pits: features.pits.map(key), repairs: features.repairs.map(key), express: features.express.map(key),
+        gears: Object.fromEntries(Object.entries(features.gears).map(([cell,turn]) => [key(cell),turn])),
+        conveyors: Object.fromEntries(Object.entries(features.conveyors).map(([cell,facing]) =>
+            [key(cell),keyPoint(cell)[1] < 12 ? direction(facing) : facing])),
+        walls: features.walls.map((wall) => {
+            const [x,y,facing] = wall.split(",");
+            const [nx,ny] = point(Number(x),Number(y));
+            return `${nx},${ny},${Number(y) < 12 ? direction(facing) : facing}`;
+        }),
+        lasers: features.lasers.map((laser) => {
+            const [x,y] = point(laser.x,laser.y);
+            return {...laser,x,y,direction:laser.y < 12 ? direction(laser.direction) : laser.direction};
+        }),
+        pushers: features.pushers.map((pusher) => {
+            const [x,y] = point(pusher.x,pusher.y);
+            return {...pusher,x,y,direction:pusher.y < 12 ? direction(pusher.direction) : pusher.direction};
+        }),
+        hintConnections: (features.hintConnections || []).filter(sameSection).map(connection),
+        connections: (features.connections || []).filter(sameSection).map(connection)};
+    Object.entries(next.conveyors).forEach(([from,facing]) => {
+        const [x,y] = keyPoint(from), [dx,dy] = FIELD_VECTORS[facing], targetY = y+dy;
+        if (!((y === 11 && targetY === 12) || (y === 12 && targetY === 11))) return;
+        const to = `${x+dx},${targetY}`;
+        if (!next.conveyors[to] || next.conveyors[to] === OPPOSITE_DIRECTION[facing]) return;
+        const boundary = physicalWallId(`${from},${facing}`);
+        if (next.walls.some((wall) => physicalWallId(wall) === boundary)) return;
+        const link = `${from}|${to}`;
+        if (!next.connections.includes(link)) next.connections.push(link);
+    });
+    return {features: next, flags: flags.map(([x,y]) => point(x,y))};
+}
+
+function validateFieldImport(payload, state) {
+    const fail = (message) => { throw new Error(message); };
+    if (!payload || payload.format !== "roborally-web-field" || payload.version !== 1)
+        fail("неподдерживаемый формат файла");
+    const {name, start, features, flags} = payload;
+    if (typeof name !== "string" || name.length > 50 || !state.startCards.includes(start)
+        || !features || features.fullField !== true || !Array.isArray(flags)) fail("неверные общие данные поля");
+    const cell = (key) => typeof key === "string" && /^\d{1,2},\d{1,2}$/.test(key)
+        && keyPoint(key)[0] < 12 && keyPoint(key)[1] < 16;
+    const direction = (value) => EDITOR_DIRECTIONS.includes(value);
+    const cellList = (value) => Array.isArray(value) && value.length <= 192 && value.every(cell);
+    const map = (value, check) => value && typeof value === "object" && !Array.isArray(value)
+        && Object.entries(value).length <= 192 && Object.entries(value).every(([key,item]) => cell(key) && check(item));
+    if (!cellList(features.pits) || !cellList(features.repairs) || !cellList(features.express)
+        || !map(features.gears, (turn) => turn === 1 || turn === -1)
+        || !map(features.conveyors, direction)
+        || !Array.isArray(features.walls) || features.walls.length > 768
+        || !features.walls.every((wall) => typeof wall === "string" && wall.split(",").length === 3
+            && cell(wall.split(",").slice(0,2).join(",")) && direction(wall.split(",")[2]))
+        || !Array.isArray(features.lasers) || features.lasers.length > 192
+        || !features.lasers.every((laser) => laser && cell(`${laser.x},${laser.y}`)
+            && Number.isInteger(laser.x) && Number.isInteger(laser.y)
+            && direction(laser.direction) && [1,2,3].includes(laser.count))
+        || !Array.isArray(features.pushers) || features.pushers.length > 192
+        || !features.pushers.every((pusher) => pusher && cell(`${pusher.x},${pusher.y}`)
+            && Number.isInteger(pusher.x) && Number.isInteger(pusher.y)
+            && direction(pusher.direction) && Array.isArray(pusher.active) && pusher.active.length > 0
+            && pusher.active.length <= 5 && pusher.active.every((register) => Number.isInteger(register) && register >= 1 && register <= 5)))
+        fail("повреждён список элементов");
+    if (features.pushers.some((pusher,index) => features.pushers.slice(0,index).some((other) =>
+        other.x === pusher.x && other.y === pusher.y
+        && (other.direction === pusher.direction || other.active.some((register) => pusher.active.includes(register))))))
+        fail("толкатели на одной клетке срабатывают в одном регистре");
+    const occupied = new Set(features.pits);
+    if (features.repairs.some((key) => occupied.has(key)) || Object.keys(features.gears).some((key) => occupied.has(key))
+        || Object.keys(features.conveyors).some((key) => occupied.has(key))
+        || features.express.some((key) => !features.conveyors[key])
+        || features.lasers.some(({x,y}) => occupied.has(`${x},${y}`))
+        || features.pushers.some(({x,y}) => occupied.has(`${x},${y}`))) fail("элементы пересекаются с ямой");
+    const startLayout = state.startTemplates?.[start];
+    if (!startLayout) fail("нет данных стартового поля");
+    for (const {x,y} of startLayout.starts) {
+        const key = `${x},${y}`;
+        if (occupied.has(key) || features.repairs.includes(key) || Object.hasOwn(features.gears,key)
+            || features.conveyors[key] !== startLayout.conveyors[key]
+            || features.express.includes(key) !== startLayout.express.includes(key)
+            || features.lasers.some((laser) => laser.x === x && laser.y === y)
+            || features.pushers.some((pusher) => pusher.x === x && pusher.y === y))
+            fail("изменена стартовая клетка");
+    }
+    const connections = features.connections || [];
+    const hints = features.hintConnections || [];
+    if (!Array.isArray(connections) || connections.length > 384 || !Array.isArray(hints)
+        || hints.length > 384 || !hints.every((entry) => typeof entry === "string"
+            && entry.split("|").length === 2 && entry.split("|").every(cell))
+        || !connections.every((entry) => {
+            if (typeof entry !== "string") return false;
+            const [from,to,...rest] = entry.split("|");
+            if (rest.length || !cell(from) || !cell(to) || !features.conveyors[from]
+                || !features.conveyors[to]) return false;
+            const [x,y] = keyPoint(from), [tx,ty] = keyPoint(to), dir = features.conveyors[from];
+            const [dx,dy] = FIELD_VECTORS[dir];
+            return x+dx === tx && y+dy === ty && features.conveyors[to] !== OPPOSITE_DIRECTION[dir]
+                && !features.walls.some((wall) => physicalWallId(wall) === physicalWallId(`${from},${dir}`));
+        })) fail("неверные связи конвейеров");
+    if (flags.length > 8 || !flags.every((flag) => Array.isArray(flag) && flag.length === 2
+        && flag.every(Number.isInteger) && cell(flag.join(",")) && !occupied.has(flag.join(","))
+        && !startLayout.starts.some((point) => point.x === flag[0] && point.y === flag[1]))
+        || new Set(flags.map((flag) => flag.join(","))).size !== flags.length) fail("неверные позиции флагов");
+    const cleanFeatures = cloneEditableFeatures(features);
+    cleanFeatures.walls = cleanFeatures.walls.filter((wall) => !wallBetweenPits(occupied, wall));
+    cleanFeatures.connections = [...connections];
+    cleanFeatures.hintConnections = [...hints];
+    return {name, start, sourceBoard: Object.hasOwn(state.boardTemplates || {},payload.sourceBoard)
+        ? payload.sourceBoard : "", rotation: [0,90,180,270].includes(payload.rotation) ? payload.rotation : 0,
+        features: cleanFeatures, flags: flags.map((flag) => [...flag])};
+}
+
+function editorCellWithoutDevice(features, key) {
+    features.pits = features.pits.filter((item) => item !== key);
+    features.repairs = features.repairs.filter((item) => item !== key);
+    features.express = features.express.filter((item) => item !== key);
+    delete features.gears[key];
+    delete features.conveyors[key];
+    features.connections = (features.connections || []).filter((entry) => {
+        const [from,to] = entry.split("|");
+        return from !== key && to !== key;
+    });
+    const [x,y] = keyPoint(key);
+    features.lasers = features.lasers.filter((item) => item.x !== x || item.y !== y);
+    features.pushers = features.pushers.filter((item) => item.x !== x || item.y !== y);
+}
+
+function editorRemoveConnectionsAcrossWall(features, wall) {
+    const boundary = physicalWallId(wall);
+    features.connections = (features.connections || []).filter((entry) => {
+        const [from,to] = entry.split("|");
+        const [x,y] = keyPoint(from), [tx,ty] = keyPoint(to);
+        const direction = EDITOR_DIRECTIONS.find((candidate) => {
+            const [dx,dy] = FIELD_VECTORS[candidate];
+            return x+dx === tx && y+dy === ty;
+        });
+        return !direction || physicalWallId(`${from},${direction}`) !== boundary;
+    });
+}
+
+function editorRemoveWalls(features, boundaries) {
+    features.walls = features.walls.filter((wall) => !boundaries.has(physicalWallId(wall)));
+    features.lasers = features.lasers.filter((laser) =>
+        !boundaries.has(physicalWallId(`${laser.x},${laser.y},${OPPOSITE_DIRECTION[laser.direction]}`)));
+    features.pushers = features.pushers.filter((pusher) =>
+        !boundaries.has(physicalWallId(`${pusher.x},${pusher.y},${OPPOSITE_DIRECTION[pusher.direction]}`)));
+}
+
+class FieldEditorModal extends React.Component {
+    constructor(props) {
+        super(props);
+        const course = props.state.course;
+        const start = course.start || props.state.startCards[1];
+        const sourceFeatures = course.customFeatures ? cloneEditableFeatures(course.customFeatures) : emptyEditableFeatures();
+        const initial = {name: course.customFeatures ? course.name : "Моё поле",
+            start,
+            sourceBoard: course.customFeatures && Object.hasOwn(props.state.boardTemplates || {},course.board) ? course.board : "",
+            rotation: course.editorRotation || 0,
+            features: course.customFeatures?.fullField ? sourceFeatures
+                : withEditableStart(sourceFeatures, props.state.startTemplates?.[start]),
+            flags: course.customFeatures ? course.flags.map((flag) => [...flag]) : [],
+            tool: "conveyor", express: false, gearTurn: 1, laserCount: 1,
+            notice: "",
+            pusherRegisters: [1,3,5], drawing: [], history: [], future: []};
+        this.state = props.draft ? {...props.draft, drawing: []} : initial;
+        this.dialogRef = React.createRef();
+        this.importRef = React.createRef();
+        this.handleKeyDown = this.handleKeyDown.bind(this);
+    }
+
+    componentDidMount() {
+        this.previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        document.addEventListener("keydown", this.handleKeyDown);
+        requestAnimationFrame(() => this.dialogRef.current?.querySelector(".rr-editor-close")?.focus());
+    }
+
+    componentWillUnmount() {
+        document.body.style.overflow = this.previousOverflow || "";
+        document.removeEventListener("keydown", this.handleKeyDown);
+        if (this.props.returnFocus && document.contains(this.props.returnFocus)) this.props.returnFocus.focus();
+    }
+
+    handleKeyDown(event) {
+        if (event.key === "Escape") { event.preventDefault(); this.close(); return; }
+        if ((event.ctrlKey || event.metaKey) && (event.code === "KeyZ" || event.code === "KeyY")) {
+            if (["INPUT","TEXTAREA"].includes(event.target.tagName) && event.target.type !== "file") return;
+            event.preventDefault();
+            if (event.shiftKey || event.code === "KeyY") this.redo();
+            else this.undo();
+            return;
+        }
+        if (event.key !== "Tab" || !this.dialogRef.current) return;
+        const focusable = [...this.dialogRef.current.querySelectorAll("button:not([disabled]),input,select")];
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+
+    close() {
+        this.props.onClose({...this.state, drawing: []});
+    }
+
+    exportField() {
+        const payload = {format: "roborally-web-field", version: 1, name: this.state.name,
+            start: this.state.start, sourceBoard: this.state.sourceBoard, rotation: this.state.rotation,
+            features: this.state.features, flags: this.state.flags};
+        const blob = new Blob([JSON.stringify(payload,null,2)], {type: "application/json"});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `RoboRally-${(this.state.name.trim() || "поле").replace(/[^a-zA-Z0-9А-Яа-яЁё-]+/g,"-")}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        this.setState({notice: "Поле экспортировано в JSON."});
+    }
+
+    async importField(event) {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        try {
+            if (file.size > 256 * 1024) throw new Error("файл слишком большой");
+            const imported = validateFieldImport(JSON.parse(await file.text()), this.props.state);
+            this.commit(() => ({...imported, notice: "Поле импортировано. Проверьте его и выберите для игры."}));
+        } catch (error) {
+            this.setState({notice: `Импорт не выполнен: ${error instanceof SyntaxError ? "неверный JSON" : error.message}`});
+        }
+    }
+
+    changeBoard(sourceBoard) {
+        const template = sourceBoard ? this.props.state.boardTemplates[sourceBoard] : null;
+        this.commit((current) => ({sourceBoard, features: withEditableStart(template || emptyEditableFeatures(),
+            this.props.state.startTemplates?.[current.start]), flags: [], rotation: 0}));
+    }
+
+    clearBoard() {
+        this.commit((current) => ({sourceBoard: "", rotation: 0, flags: [],
+            features: withEditableStart(emptyEditableFeatures(), this.props.state.startTemplates?.[current.start]),
+            notice: "Поле очищено. Действие можно отменить."}));
+    }
+
+    rotateBoard(clockwise) {
+        this.commit((current) => ({...rotateEditableFactory(current.features,current.flags,clockwise),
+            rotation: (current.rotation + (clockwise ? 90 : 270)) % 360,
+            notice: "Основа повернута; проверьте соединения у границы стартового поля."}));
+    }
+
+    changeStart(start) {
+        const template = this.props.state.startTemplates?.[start];
+        this.commit((current) => ({start, features: withEditableStart(factoryPart(current.features), template),
+            flags: current.flags.filter(([x,y]) => !template?.starts.some((point) => point.x === x && point.y === y))}));
+    }
+
+    isFixedStart(point) {
+        return this.props.state.startTemplates?.[this.state.start]?.starts.some((start) =>
+            start.x === point.x && start.y === point.y);
+    }
+
+    editableCellBoundaries(point) {
+        return new Set(EDITOR_DIRECTIONS.map((side) => physicalWallId(`${point.key},${side}`)));
+    }
+
+    commit(change) {
+        this.setState((current) => {
+            const next = change(current);
+            if (!next) return null;
+            return {...next, history: [...current.history, {features: current.features, flags: current.flags,
+                start: current.start, sourceBoard: current.sourceBoard, rotation: current.rotation}].slice(-40), future: []};
+        });
+    }
+
+    undo() {
+        this.setState((current) => {
+            if (!current.history.length) return null;
+            const previous = current.history[current.history.length - 1];
+            return {...previous, history: current.history.slice(0,-1),
+                future: [...current.future, {features: current.features, flags: current.flags,
+                    start: current.start, sourceBoard: current.sourceBoard, rotation: current.rotation}]};
+        });
+    }
+
+    redo() {
+        this.setState((current) => {
+            if (!current.future.length) return null;
+            const next = current.future[current.future.length - 1];
+            return {...next, future: current.future.slice(0,-1),
+                history: [...current.history, {features: current.features, flags: current.flags,
+                    start: current.start, sourceBoard: current.sourceBoard, rotation: current.rotation}]};
+        });
+    }
+
+    point(event) {
+        const box = event.currentTarget.getBoundingClientRect();
+        const fx = (event.clientX - box.left) / box.width * 12;
+        const fy = (event.clientY - box.top) / box.height * 16;
+        if (fx < 0 || fx >= 12 || fy < 0 || fy >= 16) return null;
+        const x = Math.floor(fx), y = Math.floor(fy);
+        const edgeDistances = {north: fy - y, east: x + 1 - fx, south: y + 1 - fy, west: fx - x};
+        const side = Object.entries(edgeDistances).sort((a,b) => a[1] - b[1])[0][0];
+        return {x,y,side,edgeDistance: edgeDistances[side],key: `${x},${y}`};
+    }
+
+    beginDraw(event) {
+        if (event.button !== 0) return;
+        const point = this.point(event);
+        if (!point || (this.isFixedStart(point) && this.state.tool !== "wall"
+            && !(this.state.tool === "erase" && point.edgeDistance <= .18))) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        this.drag = {pointerId: event.pointerId, points: [point]};
+        if (["conveyor","pit","erase"].includes(this.state.tool)) this.setState({drawing: [point.key]});
+    }
+
+    continueDraw(event) {
+        if (!this.drag || this.drag.pointerId !== event.pointerId) return;
+        if (!["conveyor","pit","erase"].includes(this.state.tool)) return;
+        const point = this.point(event);
+        if (!point || (this.isFixedStart(point) && this.state.tool !== "erase")) return;
+        const points = this.drag.points;
+        const last = points[points.length - 1];
+        if (point.key === last.key) return;
+        if (this.state.tool === "conveyor" && Math.abs(point.x-last.x)+Math.abs(point.y-last.y) !== 1) return;
+        if (points.length > 1 && point.key === points[points.length - 2].key) points.pop();
+        else if (!points.some((item) => item.key === point.key)) points.push(point);
+        this.setState({drawing: points.map((item) => item.key)});
+    }
+
+    finishDraw(event) {
+        if (!this.drag || this.drag.pointerId !== event.pointerId) return;
+        const points = this.drag.points;
+        this.drag = null;
+        this.setState({drawing: []});
+        if (!points.length) return;
+        if (this.state.tool === "conveyor" && points.length > 1) {
+            const existing = this.state.features;
+            for (let index = 0; index < points.length - 1; index++) {
+                const from = points[index], to = points[index+1];
+                const direction = EDITOR_DIRECTIONS.find((candidate) => {
+                    const [dx,dy] = FIELD_VECTORS[candidate];
+                    return from.x+dx === to.x && from.y+dy === to.y;
+                });
+                if (!direction) {
+                    this.setState({notice: "Ведите маршрут через соседние клетки."});
+                    return;
+                }
+                if (existing.conveyors[from.key] && existing.conveyors[from.key] !== direction) {
+                    this.setState({notice: "Через этот конвейер нельзя провести ленту поперёк его движения."});
+                    return;
+                }
+                const boundary = physicalWallId(`${from.key},${direction}`);
+                if (existing.walls.some((wall) => physicalWallId(wall) === boundary)) {
+                    this.setState({notice: "Конвейер не может проходить сквозь стену."});
+                    return;
+                }
+            }
+        }
+        if (this.state.tool === "pusher") {
+            const point = points[0], facing = OPPOSITE_DIRECTION[point.side];
+            const conflict = this.state.features.pushers.some((pusher) => pusher.x === point.x && pusher.y === point.y
+                && pusher.direction !== facing
+                && pusher.active.some((register) => this.state.pusherRegisters.includes(register)));
+            if (conflict) {
+                this.setState({notice: "Толкатели на одной клетке не могут срабатывать в одном регистре."});
+                return;
+            }
+        }
+        if (this.state.tool === "wall") {
+            const point = points[0], wall = `${point.key},${point.side}`;
+            const existed = this.state.features.walls.some((entry) => physicalWallId(entry) === physicalWallId(wall));
+            if (!existed && wallBetweenPits(new Set(this.state.features.pits), wall)) {
+                this.setState({notice: "Стена внутри ямы невозможна. Ставьте её только по внешнему краю."});
+                return;
+            }
+        }
+        if (this.state.tool === "conveyor" && points.length > 1) {
+            const last = points[points.length-1], previous = points[points.length-2];
+            const existing = this.state.features.conveyors[last.key];
+            const incoming = EDITOR_DIRECTIONS.find((direction) => {
+                const [dx,dy] = FIELD_VECTORS[direction];
+                return previous.x + dx === last.x && previous.y + dy === last.y;
+            });
+            if (existing && existing === OPPOSITE_DIRECTION[incoming]) {
+                this.setState({notice: "Здесь лента развернулась бы обратно. Измените точку слияния."});
+                return;
+            }
+        }
+        this.commit((current) => {
+            const features = cloneEditableFeatures(current.features), flags = current.flags.map((flag) => [...flag]);
+            const tool = current.tool;
+            if (tool === "conveyor" || tool === "pit") {
+                points.forEach((point, index) => {
+                    if (tool === "conveyor" && points.length > 1
+                        && features.conveyors[point.key]) return;
+                    editorCellWithoutDevice(features, point.key);
+                    if (tool === "pit") {
+                        const flag = flags.findIndex(([x,y]) => `${x},${y}` === point.key);
+                        if (flag >= 0) flags.splice(flag,1);
+                        features.pits.push(point.key);
+                        return;
+                    }
+                    const next = points[index + 1], previous = points[index - 1];
+                    const neighbor = next || (previous ? {x: point.x * 2 - previous.x, y: point.y * 2 - previous.y} : null);
+                    const direction = neighbor ? EDITOR_DIRECTIONS.find((candidate) => {
+                        const [dx,dy] = FIELD_VECTORS[candidate];
+                        return point.x + dx === neighbor.x && point.y + dy === neighbor.y;
+                    }) : point.side;
+                    features.conveyors[point.key] = direction || point.side;
+                    if (current.express) features.express.push(point.key);
+                });
+                if (tool === "conveyor") points.slice(0,-1).forEach((point,index) => {
+                    const connection = `${point.key}|${points[index+1].key}`;
+                    if (!features.connections.includes(connection)) features.connections.push(connection);
+                });
+                if (tool === "pit") {
+                    const pitCells = new Set(features.pits);
+                    features.walls = features.walls.filter((wall) => !wallBetweenPits(pitCells, wall));
+                }
+            } else {
+                const {x,y,key,side} = points[0];
+                const facing = OPPOSITE_DIRECTION[side];
+                if (tool === "flag") {
+                    const index = flags.findIndex(([fx,fy]) => fx === x && fy === y);
+                    if (index >= 0) flags.splice(index,1);
+                    else if (flags.length < 8 && !features.pits.includes(key)) flags.push([x,y]);
+                } else if (tool === "erase") {
+                    if (points.length === 1) {
+                        const boundary = physicalWallId(`${key},${side}`);
+                        if (points[0].edgeDistance <= .18
+                            && features.walls.some((wall) => physicalWallId(wall) === boundary))
+                            editorRemoveWalls(features, new Set([boundary]));
+                        else if (!this.isFixedStart(points[0])) {
+                            editorCellWithoutDevice(features,key);
+                            const index = flags.findIndex(([fx,fy]) => fx === x && fy === y);
+                            if (index >= 0) flags.splice(index,1);
+                        }
+                    } else {
+                        const boundaries = new Set();
+                        points.forEach((point) => {
+                            if (!this.isFixedStart(point)) editorCellWithoutDevice(features,point.key);
+                            for (const boundary of this.editableCellBoundaries(point)) boundaries.add(boundary);
+                            const index = this.isFixedStart(point) ? -1
+                                : flags.findIndex(([fx,fy]) => fx === point.x && fy === point.y);
+                            if (index >= 0) flags.splice(index,1);
+                        });
+                        editorRemoveWalls(features,boundaries);
+                    }
+                } else if (tool === "wall") {
+                    const wall = `${key},${side}`, physical = physicalWallId(wall);
+                    const existed = features.walls.some((entry) => physicalWallId(entry) === physical);
+                    features.walls = features.walls.filter((entry) => physicalWallId(entry) !== physical);
+                    if (!existed) {
+                        features.walls.push(wall);
+                        editorRemoveConnectionsAcrossWall(features, wall);
+                    }
+                } else if (tool === "repair" || tool === "gear") {
+                    editorCellWithoutDevice(features,key);
+                    if (tool === "repair") features.repairs.push(key);
+                    else features.gears[key] = current.gearTurn;
+                } else if (tool === "laser" || tool === "pusher") {
+                    if (features.pits.includes(key)) return null;
+                    const list = tool === "laser" ? features.lasers : features.pushers;
+                    const existing = list.findIndex((item) => item.x === x && item.y === y && item.direction === facing);
+                    if (existing >= 0) list.splice(existing,1);
+                    list.push(tool === "laser" ? {x,y,direction:facing,count:current.laserCount}
+                        : {x,y,direction:facing,active:[...current.pusherRegisters]});
+                    const wall = `${key},${tool === "laser" ? OPPOSITE_DIRECTION[facing] : side}`;
+                    if (!features.walls.some((entry) => physicalWallId(entry) === physicalWallId(wall))) features.walls.push(wall);
+                    editorRemoveConnectionsAcrossWall(features, wall);
+                }
+            }
+            return {features, flags, notice: ""};
+        });
+    }
+
+    save() {
+        if (!this.state.flags.length || this.state.flags.some(([x,y]) => this.state.features.pits.includes(`${x},${y}`)
+            || this.isFixedStart({x,y}))) return;
+        const payload = {name: this.state.name, sourceBoard: this.state.sourceBoard,
+            start: this.state.start, editorRotation: this.state.rotation,
+            features: this.state.features, flags: this.state.flags};
+        if (new TextEncoder().encode(JSON.stringify(payload)).length > 9000) {
+            this.setState({notice: "Поле слишком большое для отправки в комнату. Уберите часть элементов."});
+            return;
+        }
+        this.props.app.socket.emit("set-authored-course", payload);
+        this.props.onClose(null);
+    }
+
+    render() {
+        const {state} = this.props;
+        const {features, flags} = this.state;
+        return <div className="rr-editor-backdrop" onClick={(event) => event.target === event.currentTarget && this.close()}>
+            <section className="rr-editor-modal" role="dialog" aria-modal="true" aria-labelledby="rr-editor-title" ref={this.dialogRef}>
+                <header className="rr-editor-heading"><div><h2 id="rr-editor-title">Редактор поля</h2><p>Нарисуйте маршрут конвейера или выберите элемент и щёлкните по клетке.</p></div>
+                    <button type="button" className="rr-editor-close" aria-label="Закрыть редактор" onClick={() => this.close()}>×</button></header>
+                <div className="rr-editor-topbar">
+                    <label>Основа <select aria-label="Основа поля" value={this.state.sourceBoard} onChange={(event) => this.changeBoard(event.target.value)}>
+                        <option value="">Пустое поле</option>{Object.keys(state.boardTemplates || {}).map((board) => <option value={board} key={board}>Копия: {board}</option>)}
+                    </select></label>
+                    <label>Название <input aria-label="Название своего поля" maxLength="50" value={this.state.name} onChange={(event) => this.setState({name: event.target.value})}/></label>
+                    <label>Старт <select aria-label="Старт своего поля" value={this.state.start} onChange={(event) => this.changeStart(event.target.value)}>
+                        {state.startCards.map((start, index) => <option value={start} key={start}>Старт {index + 1}</option>)}
+                    </select></label>
+                    <div className="rr-editor-rotation" title="Поворачивает основу 12×12; стартовые ряды остаются на месте">
+                        <button type="button" aria-label="Повернуть основу против часовой стрелки" onClick={() => this.rotateBoard(false)}>↺</button>
+                        <span>Основа {this.state.rotation}°</span>
+                        <button type="button" aria-label="Повернуть основу по часовой стрелке" onClick={() => this.rotateBoard(true)}>↻</button>
+                    </div>
+                    <button type="button" disabled={!this.state.history.length} onClick={() => this.undo()}>↶ Отменить</button>
+                    <button type="button" disabled={!this.state.future.length} onClick={() => this.redo()}>↷ Повторить</button>
+                    <button type="button" className="rr-editor-clear" onClick={() => this.clearBoard()}
+                        title="Вернуть пустую основу и исходную стартовую карту; можно отменить">Очистить</button>
+                </div>
+                <div className="rr-editor-workspace">
+                    <div className="rr-editor-palette" aria-label="Инструменты редактора">
+                        {EDITOR_TOOLS.map(([tool,label]) => <button type="button" key={tool} className={this.state.tool === tool ? "selected" : ""}
+                            aria-label={label} title={label} aria-pressed={this.state.tool === tool} onClick={() => this.setState({tool})}>
+                            <EditorToolIcon tool={tool} gearTurn={this.state.gearTurn} express={this.state.express}/>
+                            <span className="rr-editor-tool-label">{label}</span>
+                        </button>)}
+                    </div>
+                    <div className="rr-editor-board-column">
+                        <div className="rr-editor-board" role="img" aria-label="Редактируемое поле 12 на 16 клеток"
+                            onPointerDown={(event) => this.beginDraw(event)} onPointerMove={(event) => this.continueDraw(event)}
+                            onPointerUp={(event) => this.finishDraw(event)} onPointerCancel={() => { this.drag = null; this.setState({drawing: []}); }}>
+                            <div className="rr-editor-factory"><CustomFactoryArt features={features}
+                                starts={state.startTemplates?.[this.state.start]?.starts || []}/>
+                                {flags.map(([x,y], index) => <FlagMarker key={`${x},${y}`} className="rr-editor-flag"
+                                    number={index + 1} style={{left: `${(x+.5)/12*100}%`, top: `${(y+.5)/16*100}%`}}/>)}
+                                {this.state.drawing.map((key) => {
+                                    const [x,y] = keyPoint(key);
+                                    return <i key={key} className="rr-editor-drawing" style={customCellStyle(x,y,16)}/>;
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="rr-editor-inspector">
+                        <h3>{EDITOR_TOOLS.find(([tool]) => tool === this.state.tool)?.[1] || "Инструмент"}</h3>
+                        {this.state.tool === "conveyor" ? <React.Fragment><div className="rr-editor-edge-guide"><strong>Одна клетка: направление к выбранному краю</strong>
+                            <span>Щёлкните ближе к краю, куда должна двигаться лента. Для маршрута проведите по соседним клеткам.</span></div>
+                            <div className="rr-editor-variants" role="group" aria-label="Тип конвейера">
+                                <button type="button" className={!this.state.express ? "selected" : ""} aria-pressed={!this.state.express}
+                                    onClick={() => this.setState({express:false})}><EditorToolIcon tool="conveyor"/><span>Обычный</span></button>
+                                <button type="button" className={this.state.express ? "selected" : ""} aria-pressed={this.state.express}
+                                    onClick={() => this.setState({express:true})}><EditorToolIcon tool="conveyor" express/><span>Экспресс</span></button>
+                            </div>
+                            </React.Fragment> : null}
+                        {this.state.tool === "laser" ? <React.Fragment><div className="rr-editor-edge-guide"><strong>Направление задаёт край клетки</strong>
+                            <span>Щёлкните у нужного края: там появится стена, а луч пойдёт от неё внутрь. Правый край → влево.</span></div>
+                            <label>Лучей <select value={this.state.laserCount} onChange={(event) => this.setState({laserCount:Number(event.target.value)})}>
+                                {[1,2,3].map((count) => <option value={count} key={count}>{count}</option>)}</select></label></React.Fragment> : null}
+                        {this.state.tool === "pusher" ? <div><p>Работает в регистрах:</p><div className="rr-editor-registers">{[1,2,3,4,5].map((register) =>
+                            <button type="button" key={register} className={this.state.pusherRegisters.includes(register) ? "selected" : ""}
+                                aria-pressed={this.state.pusherRegisters.includes(register)} onClick={() => this.setState((current) => ({pusherRegisters:
+                                    current.pusherRegisters.includes(register) ? current.pusherRegisters.length > 1 ? current.pusherRegisters.filter((value) => value !== register) : current.pusherRegisters
+                                        : [...current.pusherRegisters,register].sort()}))}>{register}</button>)}</div></div> : null}
+                        {this.state.tool === "gear" ? <div className="rr-editor-variants" role="group" aria-label="Направление шестерни">
+                            <button type="button" className={this.state.gearTurn === 1 ? "selected" : ""} aria-label="По часовой стрелке"
+                                title="По часовой стрелке" aria-pressed={this.state.gearTurn === 1} onClick={() => this.setState({gearTurn:1})}>
+                                <EditorToolIcon tool="gear"/><span>↻ По часовой</span></button>
+                            <button type="button" className={this.state.gearTurn === -1 ? "selected" : ""} aria-label="Против часовой стрелки"
+                                title="Против часовой стрелки" aria-pressed={this.state.gearTurn === -1} onClick={() => this.setState({gearTurn:-1})}>
+                                <EditorToolIcon tool="gear" gearTurn={-1}/><span>↺ Против</span></button>
+                        </div> : null}
+                        {this.state.tool === "wall" ? <div className="rr-editor-edge-guide"><strong>Стена появится на выбранном краю</strong>
+                            <span>Щёлкните ближе к нужной стороне клетки.</span></div> : null}
+                        {this.state.tool === "pusher" ? <div className="rr-editor-edge-guide"><strong>Толкатель крепится к стене</strong>
+                            <span>Щёлкните у края клетки: там появится стена, а толкатель будет двигать от неё внутрь клетки.</span></div> : null}
+                        {this.state.tool === "erase" ? <div className="rr-editor-edge-guide"><strong>Клик или выделение</strong>
+                            <span>Щёлкните по стене, чтобы удалить только её. Проведите по нескольким клеткам, чтобы очистить их целиком.</span></div> : null}
+                        <div className="rr-editor-flags"><h3>Флаги · {flags.length}/8</h3>{flags.map(([x,y], index) => <div key={`${x},${y}`}>
+                            <span>{index+1}. ({x+1}, {y+1})</span>
+                            <button type="button" disabled={!index} aria-label={`Поднять флаг ${index+1}`} onClick={() => this.commit((current) => {
+                                const next = current.flags.map((flag) => [...flag]); [next[index-1],next[index]]=[next[index],next[index-1]]; return {flags:next};
+                            })}>↑</button>
+                            <button type="button" aria-label={`Удалить флаг ${index+1}`} onClick={() => this.commit((current) => ({flags:current.flags.filter((_,position) => position !== index)}))}>×</button>
+                        </div>)}</div>
+                    </div>
+                </div>
+                <footer className="rr-editor-footer"><span role="status">{this.state.notice || (flags.length ? "Поле готово к выбору" : "Поставьте хотя бы один флаг")}</span>
+                    <input ref={this.importRef} className="rr-editor-file-input" type="file" accept=".json,application/json"
+                        aria-label="Файл поля для импорта" onChange={(event) => this.importField(event)}/>
+                    <button type="button" onClick={() => this.importRef.current?.click()} title="Загрузить поле из JSON">Импорт JSON</button>
+                    <button type="button" onClick={() => this.exportField()} title="Скачать поле в JSON">Экспорт JSON</button>
+                    <button type="button" onClick={() => this.close()}>Закрыть</button>
+                    <button type="button" className="primary" disabled={!flags.length || flags.some(([x,y]) => features.pits.includes(`${x},${y}`))}
+                        onClick={() => this.save()}>Выбрать это поле</button></footer>
+            </section>
+        </div>;
+    }
+}
+
 class CourseSetup extends React.Component {
     constructor(props) {
         super(props);
-        this.state = {board: props.state.course.board, start: props.state.course.start, rotation: props.state.course.rotation || 0,
+        this.state = {board: standardBoardName(props.state, props.state.course.board),
+            start: props.state.course.start, rotation: props.state.course.rotation || 0,
             name: "Мой курс", flags: [[2,2], [9,5], [5,9]], flagHistory: [], inspectedCourseId: props.state.course.id,
-            courseQuery: "", fitOnly: false, catalogOpen: true};
+            courseQuery: "", fitOnly: false, catalogOpen: true, editorOpen: false, editorDraft: null};
     }
 
     componentDidUpdate(previousProps) {
@@ -1049,7 +1877,8 @@ class CourseSetup extends React.Component {
     }
 
     saveCustom() {
-        this.props.app.socket.emit("set-custom-course", {name: this.state.name, board: this.state.board, start: this.state.start,
+        this.props.app.socket.emit("set-custom-course", {name: this.state.name,
+            board: standardBoardName(this.props.state, this.state.board), start: this.state.start,
             rotation: Number(this.state.rotation), flags: this.state.flags});
     }
 
@@ -1073,6 +1902,7 @@ class CourseSetup extends React.Component {
 
     render() {
         const {state, app, playerCount, readOnly} = this.props;
+        const quickBoard = standardBoardName(state, this.state.board);
         const selected = state.course.id;
         const previewFlags = this.state.flags;
         const normalizedQuery = this.state.courseQuery.trim().toLocaleLowerCase("ru");
@@ -1148,10 +1978,12 @@ class CourseSetup extends React.Component {
                     </section>
                 </div>
             </details>
-            {!readOnly ? <details className="constructor"><summary><span>Конструктор своего курса</span><em>Создать курс</em></summary>
+            {!readOnly ? <div className="rr-editor-launch"><div><strong>Своё поле</strong><small>Начните с пустого поля или измените готовое.</small></div>
+                <button type="button" className="primary" onClick={(event) => { this.editorReturnFocus = event.currentTarget; this.setState({editorOpen:true}); }}>Открыть редактор поля</button></div> : null}
+            {!readOnly ? <details className="constructor"><summary><span>Быстрый курс: готовое поле + флаги</span><em>Открыть</em></summary>
                 <div className="constructor-fields">
                     <label>Название<input value={this.state.name} onChange={(event) => this.setState({name: event.target.value})}/></label>
-                    <label>Карта<select value={this.state.board} onChange={(event) => this.setState({board: event.target.value})}>{Object.keys(state.boardCards).map((board) => <option key={board}>{board}</option>)}</select></label>
+                    <label>Карта<select value={quickBoard} onChange={(event) => this.setState({board: event.target.value})}>{Object.keys(state.boardCards).map((board) => <option key={board}>{board}</option>)}</select></label>
                     <label>Старт<select value={this.state.start} onChange={(event) => this.setState({start: event.target.value})}>{state.startCards.map((start) => <option value={start} key={start}>{start.replace(".jpg", "")}</option>)}</select></label>
                     <label>Поворот карты<select value={this.state.rotation} onChange={(event) => this.setState({rotation: Number(event.target.value)})}>
                         {[0,90,180,270].map((rotation) => <option value={rotation} key={rotation}>{rotation}°</option>)}</select></label>
@@ -1166,7 +1998,7 @@ class CourseSetup extends React.Component {
                         const y = Math.min(11, Math.floor(relativeY / factoryHeight * 12));
                         this.toggleFlag(x, y);
                     }}><img className="constructor-preview-board constructor-preview-factory" style={{transform: `rotate(${this.state.rotation}deg)`}}
-                        src={boardImageUrl(state, this.state.board)}/>
+                        src={boardImageUrl(state, quickBoard)}/>
                     <img className="constructor-preview-board constructor-preview-start"
                         src={startImageUrl(state, this.state.start)}/>
                     {previewFlags.map(([x, y], index) => <b className="preview-flag" key={`${x},${y},${index}`}
@@ -1185,6 +2017,8 @@ class CourseSetup extends React.Component {
                 </div>
                 <button className="primary" type="button" disabled={!previewFlags.length} onClick={() => this.saveCustom()}>Выбрать свой курс</button>
             </details> : null}
+            {this.state.editorOpen ? <FieldEditorModal state={state} app={app} draft={this.state.editorDraft} returnFocus={this.editorReturnFocus}
+                onClose={(draft) => this.setState({editorOpen:false, editorDraft:draft})}/> : null}
         </section>;
     }
 }
@@ -1646,14 +2480,16 @@ class Game extends React.Component {
                         <div className="board-wrap" style={{width: `${state.boardScale > 100 ? state.boardScale : 100}%`,
                             transform: `translate(${state.boardPanX}px, ${state.boardPanY}px)`}}>
                             <div className="board" aria-label={`Игровое поле ${state.board.name}`}>
-                            <img className="factory-card" draggable="false" style={{transform: `rotate(${state.course.rotation || 0}deg)`}}
-                                src={boardImageUrl(state, state.board.name)} />
-                            <img className="start-card" draggable="false" src={startImageUrl(state, state.board.start)} />
+                            {state.course.customFeatures ? <div className={`factory-card ${state.course.customFeatures.fullField ? "rr-full-field" : ""}`}>
+                                <CustomFactoryArt features={state.course.customFeatures}
+                                    starts={(state.startTemplates?.[state.board.start]?.starts || [])}/></div>
+                                : <img className="factory-card" draggable="false" style={{transform: `rotate(${state.course.rotation || 0}deg)`}}
+                                    src={boardImageUrl(state, state.board.name)} />}
+                            {!state.course.customFeatures?.fullField ? <img className="start-card" draggable="false" src={startImageUrl(state, state.board.start)} /> : null}
                             <div className="board-overlay" aria-hidden="true">
-                                {state.flags.filter((flag) => flag.x != null && flag.y != null).map((flag) => <div className="flag" key={flag.number}
-                                    style={{left: `${(flag.x + .5) / 12 * 100}%`, top: `${(flag.y + .5) / 16 * 100}%`}}>
-                                    <span className="flag-cloth">{flag.number}</span><span className="flag-wrench"></span>
-                                </div>)}
+                                {state.flags.filter((flag) => flag.x != null && flag.y != null).map((flag) => <FlagMarker
+                                    key={flag.number} number={flag.number} style={{left: `${(flag.x + .5) / 12 * 100}%`,
+                                        top: `${(flag.y + .5) / 16 * 100}%`}}/>)}
                                 {state.robots.filter((robot) => robot.archive && robot.archive.x != null && robot.archive.y != null && !robot.eliminated).map((robot) => <div className="archive-marker"
                                     key={`archive-${robot.userId}`} style={{left: `${robot.archive.x / 12 * 100 + .8}%`, top: `${robot.archive.y / 16 * 100 + .6}%`, background: robot.color}}
                                     title={`Архив: ${playerName(state, robot.userId)}`}>⚙</div>)}

@@ -348,16 +348,17 @@ function makeDeck() {
     return cards;
 }
 
-function publicFieldFeatures(factory, start) {
+function publicFieldFeatures(factory, start, fullField = false) {
     return {
         pits: [...factory.pits],
         repairs: [...factory.repairs],
         gears: {...factory.gears},
         starts: (start.starts || []).map((point, slot) => ({...point, slot: slot + 1})),
-        conveyors: {...factory.conveyors, ...(start.conveyors || {})},
-        express: [...factory.express, ...((start.express && [...start.express]) || [])],
+        conveyors: fullField ? {...factory.conveyors} : {...factory.conveyors, ...(start.conveyors || {})},
+        express: fullField ? [...factory.express] : [...factory.express, ...((start.express && [...start.express]) || [])],
         hintConnections: [...(factory.hintConnections || [])],
-        walls: [...factory.walls, ...((start.walls && [...start.walls]) || [])],
+        conveyorConnections: factory.conveyorConnections ? [...factory.conveyorConnections] : null,
+        walls: fullField ? [...factory.walls] : [...factory.walls, ...((start.walls && [...start.walls]) || [])],
         lasers: factory.lasers.map((laser) => ({...laser})),
         pushers: factory.pushers.map((pusher) => ({...pusher, active: [...(pusher.active || [])]}))
     };
@@ -382,6 +383,133 @@ class JSONSet extends Set {
 
 function wait(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function editableFeatures(features) {
+    const walls = features.walls;
+    const connections = Object.entries(features.conveyors).flatMap(([from, direction]) => {
+        const [x,y] = from.split(",").map(Number), vector = VECTORS[direction];
+        const to = positionKey(x + vector.x, y + vector.y);
+        if (!Object.hasOwn(features.conveyors, to)
+            || features.conveyors[to] === rotate(direction, 2)
+            || walls.has(`${x},${y},${direction}`)
+            || walls.has(`${x + vector.x},${y + vector.y},${rotate(direction, 2)}`)) return [];
+        return [`${from}|${to}`];
+    });
+    return {
+        pits: [...features.pits], repairs: [...features.repairs], gears: {...features.gears},
+        conveyors: {...features.conveyors}, express: [...features.express],
+        hintConnections: [...(features.hintConnections || [])], connections, walls: [...features.walls],
+        lasers: features.lasers.map((laser) => ({...laser})),
+        pushers: features.pushers.map((pusher) => ({...pusher, active: [...pusher.active]}))
+    };
+}
+
+const BOARD_TEMPLATES = Object.fromEntries(Object.entries(BOARD_FEATURES).map(([name, features]) =>
+    [name, editableFeatures(features)]));
+const START_TEMPLATES = Object.fromEntries(Object.entries(START_LAYOUTS).map(([name, layout]) =>
+    [name, {starts: layout.starts.map((point) => ({...point})), conveyors: {...layout.conveyors},
+        express: [...layout.express], walls: [...layout.walls]}]));
+
+function normalizeEditableFeatures(raw, startName) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const fullField = raw.fullField === true;
+    const cell = (key) => {
+        if (typeof key !== "string" || !/^\d{1,2},\d{1,2}$/.test(key)) return false;
+        const [x, y] = key.split(",").map(Number);
+        return x < BOARD_SIZE && y < (fullField ? STAGE_ROWS : BOARD_SIZE);
+    };
+    const direction = (value) => DIRECTIONS.includes(value);
+    const wall = (key) => {
+        if (typeof key !== "string") return false;
+        const parts = key.split(",");
+        return parts.length === 3 && cell(`${parts[0]},${parts[1]}`) && direction(parts[2]);
+    };
+    const keys = (value, limit, check) => Array.isArray(value) && value.length <= limit
+        && value.every(check) ? [...new Set(value)] : null;
+    const maxCells = fullField ? BOARD_SIZE * STAGE_ROWS : BOARD_SIZE * BOARD_SIZE;
+    const pits = keys(raw.pits, maxCells, cell), repairs = keys(raw.repairs, maxCells, cell);
+    const express = keys(raw.express, maxCells, cell), rawWalls = keys(raw.walls, maxCells * 4, wall);
+    if (!pits || !repairs || !express || !rawWalls || !raw.gears || !raw.conveyors
+        || typeof raw.gears !== "object" || typeof raw.conveyors !== "object"
+        || Array.isArray(raw.gears) || Array.isArray(raw.conveyors)) return null;
+    const pitCells = new Set(pits);
+    const walls = rawWalls.filter((entry) => {
+        const [xText,yText,side] = entry.split(",");
+        const x = Number(xText), y = Number(yText), {x:dx,y:dy} = VECTORS[side];
+        return !pitCells.has(`${x},${y}`) || !pitCells.has(`${x+dx},${y+dy}`);
+    });
+    const gears = Object.entries(raw.gears), conveyors = Object.entries(raw.conveyors);
+    if (gears.length > maxCells || conveyors.length > maxCells
+        || !gears.every(([key, turn]) => cell(key) && (turn === 1 || turn === -1))
+        || !conveyors.every(([key, movement]) => cell(key) && direction(movement))
+        || !express.every((key) => Object.hasOwn(raw.conveyors, key))) return null;
+    const lasers = raw.lasers, pushers = raw.pushers;
+    if (!Array.isArray(lasers) || lasers.length > maxCells || !Array.isArray(pushers) || pushers.length > maxCells
+        || !lasers.every((laser) => laser && typeof laser === "object" && !Array.isArray(laser)
+            && Number.isInteger(laser.x) && Number.isInteger(laser.y) && cell(`${laser.x},${laser.y}`)
+            && direction(laser.direction) && [1,2,3].includes(laser.count))
+        || !pushers.every((pusher) => pusher && typeof pusher === "object" && !Array.isArray(pusher)
+            && Number.isInteger(pusher.x) && Number.isInteger(pusher.y) && cell(`${pusher.x},${pusher.y}`)
+            && direction(pusher.direction) && Array.isArray(pusher.active)
+            && pusher.active.length > 0 && pusher.active.length <= 5
+            && pusher.active.every((register) => Number.isInteger(register) && register >= 1 && register <= 5))) return null;
+    for (let index = 0; index < pushers.length; index++) {
+        const pusher = pushers[index];
+        if (pushers.slice(0,index).some((other) => other.x === pusher.x && other.y === pusher.y
+            && (other.direction === pusher.direction || other.active.some((register) => pusher.active.includes(register)))))
+            return null;
+    }
+    const occupied = new Set(pits);
+    if (repairs.some((key) => occupied.has(key)) || gears.some(([key]) => occupied.has(key))
+        || conveyors.some(([key]) => occupied.has(key)) || lasers.some(({x,y}) => occupied.has(`${x},${y}`))
+        || pushers.some(({x,y}) => occupied.has(`${x},${y}`))) return null;
+    if (fullField) {
+        const startLayout = START_LAYOUTS[startName];
+        if (!startLayout) return null;
+        for (const {x,y} of startLayout.starts) {
+            const key = positionKey(x,y);
+            if (pits.includes(key) || repairs.includes(key) || Object.hasOwn(raw.gears,key)
+                || raw.conveyors[key] !== startLayout.conveyors[key]
+                || express.includes(key) !== startLayout.express.has(key)
+                || lasers.some((laser) => laser.x === x && laser.y === y)
+                || pushers.some((pusher) => pusher.x === x && pusher.y === y)) return null;
+        }
+    }
+    const connections = keys(raw.hintConnections || [], maxCells * 2, (entry) => typeof entry === "string"
+        && entry.split("|").length === 2 && entry.split("|").every(cell));
+    if (!connections) return null;
+    const conveyorConnections = keys(raw.connections || [], maxCells * 2, (entry) => {
+        if (typeof entry !== "string") return false;
+        const [from,to,...rest] = entry.split("|");
+        if (rest.length || !cell(from) || !cell(to) || !Object.hasOwn(raw.conveyors, from)
+            || !Object.hasOwn(raw.conveyors, to)) return false;
+        const [fx,fy] = from.split(",").map(Number), [tx,ty] = to.split(",").map(Number);
+        const movement = VECTORS[raw.conveyors[from]];
+        return fx + movement.x === tx && fy + movement.y === ty
+            && raw.conveyors[to] !== rotate(raw.conveyors[from], 2)
+            && !walls.includes(`${from},${raw.conveyors[from]}`)
+            && !walls.includes(`${to},${rotate(raw.conveyors[from], 2)}`);
+    });
+    if (!conveyorConnections) return null;
+    const allWalls = new Set(walls);
+    pushers.forEach((pusher) => allWalls.add(`${pusher.x},${pusher.y},${rotate(pusher.direction, 2)}`));
+    lasers.forEach((laser) => allWalls.add(`${laser.x},${laser.y},${rotate(laser.direction, 2)}`));
+    if (conveyorConnections.some((entry) => {
+        const [from,to] = entry.split("|");
+        const movement = raw.conveyors[from];
+        return allWalls.has(`${from},${movement}`) || allWalls.has(`${to},${rotate(movement, 2)}`);
+    })) return null;
+    return {fullField, pits, repairs, gears: Object.fromEntries(gears), conveyors: Object.fromEntries(conveyors),
+        express, hintConnections: connections, connections: conveyorConnections, walls: [...allWalls],
+        lasers: lasers.map(({x,y,direction,count}) => ({x,y,direction,count})),
+        pushers: pushers.map(({x,y,direction,active}) => ({x,y,direction,active: [...new Set(active)].sort()}))};
+}
+
+function hydrateEditableFeatures(features) {
+    return {size: BOARD_SIZE, ...features, pits: new Set(features.pits), repairs: new Set(features.repairs),
+        express: new Set(features.express), walls: new Set(features.walls),
+        conveyorConnections: new Set(features.connections || []), conveyorTurns: {}};
 }
 
 function jsonClone(value) {
@@ -524,7 +652,10 @@ function init(wsServer, gamePath) {
             const state = {
                 ...this.room,
                 startPositions: startLayout.starts.map((position) => ({...position})),
-                fieldFeatures: publicFieldFeatures(this.features, this.startFeatures),
+                fieldFeatures: publicFieldFeatures(this.features, this.startFeatures,
+                    !!this.room.course.customFeatures?.fullField),
+                boardTemplates: BOARD_TEMPLATES,
+                startTemplates: START_TEMPLATES,
                 programs: this.publicPrograms(),
                 playerStats: this.publicPlayerStats(),
                 onlinePlayers: [...this.room.onlinePlayers],
@@ -937,6 +1068,13 @@ function init(wsServer, gamePath) {
         }
 
         get features() {
+            if (this.room.course.customFeatures) {
+                if (this.cachedEditableCourse !== this.room.course) {
+                    this.cachedEditableCourse = this.room.course;
+                    this.cachedEditableFeatures = hydrateEditableFeatures(this.room.course.customFeatures);
+                }
+                return this.cachedEditableFeatures;
+            }
             const board = this.room.course.board;
             const rotation = normalizeRotation(this.room.course.rotation);
             const key = `${board}:${rotation}`;
@@ -971,10 +1109,12 @@ function init(wsServer, gamePath) {
 
         conveyorAt(robot) {
             if (!robot) return null;
+            if (this.room.course.customFeatures?.fullField) return this.features.conveyors[this.boardKey(robot)];
             return (this.isOnFactory(robot) ? this.features.conveyors : this.startFeatures.conveyors)[this.boardKey(robot)];
         }
 
         isExpressAt(robot) {
+            if (this.room.course.customFeatures?.fullField) return this.features.express.has(this.boardKey(robot));
             return (this.isOnFactory(robot) ? this.features.express : this.startFeatures.express).has(this.boardKey(robot));
         }
 
@@ -1355,7 +1495,7 @@ function init(wsServer, gamePath) {
                 : [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => ({x: robot.archive.x + dx, y: robot.archive.y + dy})))
                     .filter((point) => point.x !== robot.archive.x || point.y !== robot.archive.y);
             return points.filter((point) => this.isInside(point.x, point.y) && !this.robotAt(point.x, point.y)
-                    && !(point.y < BOARD_SIZE && this.features.pits.has(positionKey(point.x, point.y))))
+                    && !this.features.pits.has(positionKey(point.x, point.y)))
                 .map((point) => ({...point, directions: point.archive ? [...DIRECTIONS]
                     : DIRECTIONS.filter((direction) => this.reentryDirectionAllowed(point.x, point.y, direction))}))
                 .filter((point) => point.directions.length);
@@ -1438,7 +1578,7 @@ function init(wsServer, gamePath) {
             robot.y = target.y;
             if (cause === "толкатель" || cause === "толчок")
                 this.addBoardEvent(cause === "толкатель" ? "pusher" : "push", robot, {direction});
-            if (this.isOnFactory(robot) && this.features.pits.has(this.boardKey(robot)))
+            if (this.features.pits.has(this.boardKey(robot)))
                 this.reboot(robot, "яма");
             return true;
         }
@@ -1448,7 +1588,8 @@ function init(wsServer, gamePath) {
             const opposite = rotate(direction, 2);
             const targetX = x + vector.x;
             const targetY = y + vector.y;
-            const wallsAt = (cellY) => cellY < BOARD_SIZE ? this.features.walls : this.startFeatures.walls;
+            const wallsAt = (cellY) => this.room.course.customFeatures?.fullField ? this.features.walls
+                : cellY < BOARD_SIZE ? this.features.walls : this.startFeatures.walls;
             const sourceWall = y >= 0 && y < STAGE_ROWS && wallsAt(y).has(`${x},${y},${direction}`);
             const targetWall = targetY >= 0 && targetY < STAGE_ROWS
                 && wallsAt(targetY).has(`${targetX},${targetY},${opposite}`);
@@ -1551,7 +1692,8 @@ function init(wsServer, gamePath) {
                 .filter((item) => item.direction && (!expressOnly || this.isExpressAt(item.robot)))
                 .map((item) => {
                     const vector = VECTORS[item.direction];
-                    return {...item, target: {x: item.robot.x + vector.x, y: item.robot.y + vector.y}};
+                    return {...item, from: positionKey(item.robot.x, item.robot.y),
+                        target: {x: item.robot.x + vector.x, y: item.robot.y + vector.y}};
                 });
             const unobstructed = candidates.filter(({robot, direction}) => !this.wallBetween(robot.x, robot.y, direction));
             const targetCounts = new Map();
@@ -1581,10 +1723,14 @@ function init(wsServer, gamePath) {
                     robot.x = target.x;
                     robot.y = target.y;
                 });
-                allowed.forEach(({robot, direction}) => {
+                allowed.forEach(({robot, direction, from}) => {
                     if (robot.destroyed) return;
                     const destinationDirection = this.conveyorAt(robot);
-                    const turn=conveyorArrivalTurn(direction,destinationDirection);
+                    const connected = !this.room.course.customFeatures
+                        || (!this.room.course.customFeatures.fullField && robot.y >= BOARD_SIZE)
+                        || (!this.room.course.customFeatures?.fullField && Number(from.split(",")[1]) >= BOARD_SIZE)
+                        || this.features.conveyorConnections.has(`${from}|${this.boardKey(robot)}`);
+                    const turn=connected ? conveyorArrivalTurn(direction,destinationDirection) : 0;
                     if (turn) this.turnRobot(robot, turn);
                     this.addBoardEvent("conveyor", robot, {direction, turn: turn || 0, express: !!expressOnly});
                     if (this.features.pits.has(this.boardKey(robot))) this.reboot(robot, "конвейер переместил в яму");
@@ -1605,7 +1751,7 @@ function init(wsServer, gamePath) {
                 const targetX = flag.x + vector.x;
                 const targetY = flag.y + vector.y;
                 if (!this.isInside(targetX, targetY)
-                    || (targetY < BOARD_SIZE && this.features.pits.has(positionKey(targetX, targetY)))) {
+                    || this.features.pits.has(positionKey(targetX, targetY))) {
                     this.addLog(`Флаг ${flag.number} падает в яму и вернётся в начале следующей фазы регистра.`);
                     this.moveArchivesWithFlag(flag, null, null);
                     flag.x = null;
@@ -1675,7 +1821,7 @@ function init(wsServer, gamePath) {
             this.room.robots.forEach((robot) => {
                 if (robot.eliminated || robot.destroyed || robot.withdrawn)
                     return;
-                const gear = this.isOnFactory(robot) && this.features.gears[this.boardKey(robot)];
+                const gear = this.features.gears[this.boardKey(robot)];
                 if (gear) {
                     this.turnRobot(robot, gear);
                     this.addBoardEvent("gear", robot, {turn: gear});
@@ -1758,7 +1904,7 @@ function init(wsServer, gamePath) {
                         this.addBoardEvent("archive", robot, {onFlag: true});
                     }
                 }
-                if (!flag && this.isOnFactory(robot) && this.features.repairs.has(this.boardKey(robot))) {
+                if (!flag && this.features.repairs.has(this.boardKey(robot))) {
                     this.setRobotArchive(robot);
                     if (previousArchive !== `${robot.x},${robot.y}`)
                         this.addBoardEvent("archive", robot);
@@ -1772,7 +1918,7 @@ function init(wsServer, gamePath) {
             this.clearBoardEvents();
             let repaired = 0;
             this.room.robots.forEach((robot) => {
-                if (robot.eliminated || robot.destroyed || robot.withdrawn || !this.isOnFactory(robot))
+                if (robot.eliminated || robot.destroyed || robot.withdrawn)
                     return;
                 const onFlag = this.room.flags.some((flag) => flag.x === robot.x && flag.y === robot.y);
                 if (this.features.repairs.has(this.boardKey(robot)) || onFlag) {
@@ -2341,6 +2487,25 @@ function init(wsServer, gamePath) {
             if (this.room.paused && userId === this.room.hostId && event === "select-history-register"
                 && value && Number.isInteger(Number(value.round)) && Number.isInteger(Number(value.register))) {
                 this.selectHistoryRegister(Number(value.round), Number(value.register));
+                return;
+            }
+            if (userId === this.room.hostId && this.room.phase === "lobby" && event === "set-authored-course" && value && typeof value === "object") {
+                const customFeatures = normalizeEditableFeatures(value.features, value.start);
+                const flags = value.flags;
+                const validFlags = Array.isArray(flags) && flags.length >= 1 && flags.length <= 8
+                    && flags.every((flag) => Array.isArray(flag) && flag.length === 2
+                        && flag.every(Number.isInteger) && flag[0] >= 0 && flag[0] < BOARD_SIZE
+                        && flag[1] >= 0 && flag[1] < (customFeatures?.fullField ? STAGE_ROWS : BOARD_SIZE))
+                    && new Set(flags.map(([x,y]) => positionKey(x,y))).size === flags.length
+                    && customFeatures && flags.every(([x,y]) => !customFeatures.pits.includes(positionKey(x,y))
+                        && (!customFeatures.fullField || !START_LAYOUTS[value.start]?.starts.some((start) => start.x === x && start.y === y)));
+                if (!validFlags || !START_CARDS.includes(value.start))
+                    return this.userRegistry.send(userId, "message", "Проверьте элементы поля, старт и флаги: нужен хотя бы один флаг не в яме.");
+                const sourceBoard = Object.hasOwn(BOARD_FEATURES, value.sourceBoard) ? value.sourceBoard : "Custom";
+                this.selectCourse({id: "authored", name: String(value.name || "Моё поле").slice(0, 50),
+                    board: sourceBoard, start: value.start, rotation: 0, players: "2–8", min: 2, max: 8,
+                    length: "своя", level: "авторская", flags, customFeatures,
+                    editorRotation: [0,90,180,270].includes(value.editorRotation) ? value.editorRotation : 0});
                 return;
             }
             if (this.room.paused && userId === this.room.hostId && event === "set-history-playback"

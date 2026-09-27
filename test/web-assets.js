@@ -30,5 +30,20 @@ GUIDE_ASSETS.forEach(({id}) => {
     guideTotal += contents.length;
 });
 assert(guideTotal <= 250 * 1024, `Guide asset payload exceeds 250 KB: ${guideTotal}`);
+const editorDir = path.join(publicDir, "assets", "editor");
+const editorAssets = ["floor", "repair", "gear-right", "gear-left", "belt-straight", "express-straight"];
+assert.deepStrictEqual(fs.readdirSync(editorDir).sort(), editorAssets.map((name) => `${name}.webp`).sort(),
+    "Editor assets contain a missing or unused sprite");
+let editorTotal = 0;
+editorAssets.forEach((name) => {
+    const file = path.join(editorDir, `${name}.webp`);
+    const contents = fs.readFileSync(file);
+    assert(contents.length > 1000, `Editor asset is empty: ${file}`);
+    assert.equal(contents.subarray(0,4).toString("ascii"), "RIFF", `Editor asset is not RIFF WebP: ${file}`);
+    assert.equal(contents.subarray(8,12).toString("ascii"), "WEBP", `Editor asset is not WebP: ${file}`);
+    editorTotal += contents.length;
+});
+assert(editorTotal < 64 * 1024, `Editor sprites are too large: ${editorTotal}`);
 console.log(`All ${urls.length} board assets passed (${(total / 1024 / 1024).toFixed(2)} MB); `
-    + `${GUIDE_ASSETS.length} guide assets passed (${(guideTotal / 1024).toFixed(1)} KB).`);
+    + `${GUIDE_ASSETS.length} guide assets passed (${(guideTotal / 1024).toFixed(1)} KB); `
+    + `${editorAssets.length} editor assets passed (${(editorTotal / 1024).toFixed(1)} KB).`);

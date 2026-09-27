@@ -238,6 +238,8 @@ async function openUser(id, name) {
     assert(Math.abs(thumbnailFlag.width - thumbnailFlag.height) <= 1,
         `Course thumbnail flag must be circular: ${JSON.stringify(thumbnailFlag)}`);
     assert.equal(await viewer.page.locator(".large-course-preview img").count(), 2, "Selected course preview does not include its start board");
+    assert(await viewer.page.locator(".large-course-preview").evaluate((element) =>
+        element.classList.contains("rr-view-landscape")), "wide lobby did not default to start-on-left view");
     assert.equal(await viewer.page.getByText("Стартовое поле показано снизу.", {exact: false}).count(), 0, "Redundant selected-course explanation is visible");
     await viewer.page.locator(".course-browser > summary").click();
     assert(!await viewer.page.locator(".course-browser").evaluate((details) => details.open), "Course catalogue cannot be collapsed");
@@ -260,12 +262,25 @@ async function openUser(id, name) {
     assert(Math.abs(constructorFlag.width - constructorFlag.height) <= 1,
         `Constructor flag must be circular: ${JSON.stringify(constructorFlag)}`);
     const box = await preview.boundingBox();
+    const viewPoint = (bounds, x, y, angle) => {
+        const u = x / 12, v = y / 16;
+        const [screenX, screenY] = angle === 90 ? [1-v,u] : angle === 180 ? [1-u,1-v]
+            : angle === 270 ? [v,1-u] : [u,v];
+        return {x: 2 + screenX * (bounds.width - 4), y: 2 + screenY * (bounds.height - 4)};
+    };
     const helpBox = await host.page.locator(".constructor-help").boundingBox();
     assert(helpBox.y >= box.y + box.height, "Constructor help overlaps the course preview");
-    await preview.click({position: {x: box.width * 2.5 / 12, y: box.height * 2.5 / 16}});
+    await preview.click({position: viewPoint(box, 2.5, 2.5, 90)});
     assert.equal(await preview.locator(".preview-flag").count(), 2, "Clicking an existing flag did not remove it");
-    await preview.click({position: {x: box.width * 6.5 / 12, y: box.height * 6.5 / 12}});
+    const viewControls = host.page.locator(".constructor-fields").getByRole("group", {name: "Повернуть вид поля"});
+    await viewControls.getByRole("button", {name: "Повернуть вид по часовой стрелке"}).click();
+    assert(!await preview.evaluate((element) => element.classList.contains("rr-view-landscape")),
+        "rotating the lobby preview did not change its proportions");
+    assert(await viewer.page.locator(".large-course-preview").evaluate((element) => element.classList.contains("rr-view-landscape")),
+        "one client's view rotation changed another client's view");
+    await preview.click({position: viewPoint(await preview.boundingBox(), 6.5, 8.5, 180)});
     assert.equal(await preview.locator(".preview-flag").count(), 3, "Clicking an empty cell did not add a flag");
+    await viewControls.getByRole("button", {name: "Автоматический ракурс поля"}).click();
     await host.page.getByRole("button", {name: "Убрать все"}).click();
     assert.equal(await preview.locator(".preview-flag").count(), 0, "Clear flags did not work");
     await host.page.getByRole("button", {name: "Отменить"}).click();
@@ -273,7 +288,7 @@ async function openUser(id, name) {
     assert.equal(await preview.locator(".constructor-preview-start").count(), 1, "Constructor preview does not show the start board");
     await host.page.getByRole("button", {name: "Выбрать свой курс"}).click();
     await viewer.page.locator(".selected-course-preview", {hasText: "Мой курс"}).waitFor();
-    assert.equal(await viewer.page.locator(".selected-course-preview button").count(), 0, "Spectator received course editing controls");
+    assert.equal(await viewer.page.locator(".course-inspector-actions button").count(), 0, "Spectator received course editing controls");
     if (process.env.LOBBY_SCREENSHOT)
         await host.page.screenshot({path: process.env.LOBBY_SCREENSHOT, fullPage: true});
 
@@ -397,7 +412,7 @@ async function openUser(id, name) {
     await host.page.locator(".bottom-dock-toggle").click();
     await host.page.setViewportSize({width: 1440, height: 1000});
     assert.equal(await host.page.locator(".game-side-hud .board-toolbar").count(), 1, "Map controls are not below the information panels");
-    assert(await host.page.locator(".board-toolbar > button").last().getAttribute("class").then((value) => value.includes("board-hints-toggle")), "Hint control is not the last map button");
+    assert(await host.page.locator(".rr-board-toolbar-main > button").last().getAttribute("class").then((value) => value.includes("board-hints-toggle")), "Hint control is not the last map button");
     await host.page.getByRole("button", {name: "Авто", exact: true}).click();
     await guest.page.getByRole("button", {name: "Авто", exact: true}).click();
     await host.page.getByRole("button", {name: "Готов", exact: true}).click();

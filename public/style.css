@@ -766,3 +766,47 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
     .rr-game-options > summary { align-items: flex-start; flex-direction: column; }
     .rr-option-row { align-items: flex-start; }
 }
+
+/* The 12×16 game field stays in its original coordinates; only its complete visual layer rotates. */
+.rr-view-frame { --rr-view-canvas-width: 100%; aspect-ratio: 3 / 4; overflow: hidden; }
+.rr-view-frame.rr-view-landscape { --rr-view-canvas-width: 75%; aspect-ratio: 4 / 3; }
+.rr-view-frame > .rr-view-canvas { position: absolute; left: 50%; top: 50%; width: var(--rr-view-canvas-width); aspect-ratio: 3 / 4;
+    transform: translate(-50%,-50%) rotate(var(--rr-view-angle)); transform-origin: center; }
+.rr-view-canvas .flag, .rr-view-canvas .large-preview-flag, .rr-view-canvas .preview-flag,
+.course-thumbnail .rr-view-canvas > i { transform: translate(-50%,-50%) rotate(calc(0deg - var(--rr-view-angle))); }
+.rr-view-canvas .rr-custom-pusher > span { transform: rotate(calc(0deg - var(--rr-view-angle))); }
+.rr-view-landscape .rr-custom-pusher { gap: 2px; }
+.board-viewport.rr-view-landscape { aspect-ratio: 4 / 3; }
+.board-wrap.rr-view-frame { height: auto; }
+.board-wrap > .board.rr-view-canvas { overflow: hidden; }
+.rr-view-canvas { container-type: inline-size; }
+.field-tooltip { position: fixed; z-index: 90; max-width: min(260px,calc(100vw - 20px)); font-size: 12px; }
+.rr-view-controls { display: inline-flex; align-items: center; justify-content: center; flex-wrap: nowrap; gap: 3px; min-width: 0;
+    padding: 2px; border: 1px solid #536d7a; border-radius: 7px; background: #182a34; white-space: nowrap; }
+.rr-view-controls > span { min-width: 57px; color: #d9e8eb; text-align: center; font-size: .7rem; font-weight: 800; }
+.rr-view-controls > button { min-width: 27px; height: 27px; padding: 1px 5px; font-size: .82rem; }
+.rr-view-controls > button:last-child { font-size: .67rem; }
+.rr-view-controls > button.selected { border-color: #79dec8; color: #e8fff8; background: #246b5d; }
+.rr-playing .board-toolbar { display: grid; justify-items: center; gap: 5px; }
+.rr-board-toolbar-main { display: flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; }
+.rr-playing .board-toolbar .rr-view-controls { width: max-content; max-width: 100%; }
+@media (max-width: 380px) {
+    .rr-playing .rr-hud-footer { flex-wrap: wrap; justify-content: center; }
+    .rr-playing .rr-hud-footer .board-toolbar { flex: 1 1 100%; width: 100%; }
+    .rr-playing .rr-hud-footer .stage { flex: 1 1 100%; }
+}
+.selected-course-heading { flex-wrap: wrap; }
+.selected-course-heading > .rr-view-controls { display: inline-flex; gap: 3px; }
+.selected-course-heading > .rr-view-controls > span { color: #d9e8eb; font-size: .7rem; }
+.large-course-preview.rr-view-landscape { width: min(100%,420px); }
+.course-card { grid-template-columns: 80px minmax(0,1fr); min-height: 100px; }
+.course-card .course-thumbnail { width: 80px; }
+.course-thumbnail.rr-view-landscape { aspect-ratio: 4 / 3; }
+.constructor-fields > .rr-view-controls { grid-column: 1 / -1; justify-self: start; }
+.constructor-preview.rr-view-landscape { width: min(100%,560px); }
+.constructor-preview > .rr-view-canvas, .large-course-preview > .rr-view-canvas { container-type: inline-size; }
+.rr-editor-topbar > .rr-view-controls { height: 32px; }
+.rr-editor-board.rr-view-landscape { width: min(100%,880px,calc(100dvh - 180px)); }
+@media (min-width: 1000px) {
+    .constructor[open] { grid-template-columns: minmax(300px,560px) minmax(260px,1fr); }
+}

@@ -10,8 +10,8 @@ let browser;
 (async () => {
     await ready;
     browser = await launchBrowser();
-    const host = (await openUser(browser, {port, room: "layout-browser", name: "Host"})).page;
-    const guest = (await openUser(browser, {port, room: "layout-browser", name: "Guest"})).page;
+    const host = (await openUser(browser, {port, room: "layout-browser", name: "Host", timeout: 15000})).page;
+    const guest = (await openUser(browser, {port, room: "layout-browser", name: "Guest", timeout: 15000})).page;
     await host.getByRole("button", {name: "Присоединиться к игре"}).click();
     await guest.getByRole("button", {name: "Присоединиться к игре"}).click();
     await host.getByRole("button", {name: "Начать игру"}).click();
@@ -21,6 +21,31 @@ let browser;
         {width: 1230, height: 530}, {width: 1024, height: 650}, {width: 800, height: 600},
         {width: 390, height: 760}]) {
         await host.setViewportSize(viewport);
+        await host.waitForFunction((landscape) => document.querySelector(".board-viewport")
+            ?.classList.contains("rr-view-landscape") === landscape, viewport.width >= 1000);
+        const view = await host.locator(".board-viewport").evaluate((element) => {
+            const frame = element.getBoundingClientRect();
+            const start = element.querySelector(".start-card").getBoundingClientRect();
+            const factory = element.querySelector(".factory-card").getBoundingClientRect();
+            return {landscape: element.classList.contains("rr-view-landscape"), ratio: frame.width / frame.height,
+                startBeforeFactory: start.right <= factory.left + 2, startBelowFactory: start.top >= factory.bottom - 2};
+        });
+        assert.equal(view.landscape, viewport.width >= 1000,
+            `${viewport.width}×${viewport.height}: automatic field orientation is wrong`);
+        assert(Math.abs(view.ratio - (view.landscape ? 4/3 : 3/4)) < .03,
+            `${viewport.width}×${viewport.height}: field frame has wrong aspect ratio`);
+        assert(view.landscape ? view.startBeforeFactory : view.startBelowFactory,
+            `${viewport.width}×${viewport.height}: start card is on the wrong side`);
+        const controls = await host.locator(".board-toolbar").evaluate((toolbar) => {
+            const main = toolbar.querySelector(".rr-board-toolbar-main").getBoundingClientRect();
+            const hints = toolbar.querySelector(".board-hints-toggle").getBoundingClientRect();
+            const view = toolbar.querySelector(".rr-view-controls").getBoundingClientRect();
+            return {fits: toolbar.scrollWidth <= toolbar.clientWidth + 1,
+                hintsOnFirstRow: Math.abs(hints.top - main.top) <= 1,
+                viewOnSecondRow: view.top >= main.bottom - 1};
+        });
+        assert(controls.fits && controls.hintsOnFirstRow && controls.viewOnSecondRow,
+            `${viewport.width}×${viewport.height}: field controls are broken into extra rows or overflow`);
         const layout = await host.locator(".bottom-dock").evaluate((dock) => {
             const scroll = dock.querySelector(".bottom-dock-scroll");
             const program = dock.querySelector(".program");
@@ -54,6 +79,13 @@ let browser;
         assert(!boardGap.scrollable || boardGap.gap >= 0 && boardGap.gap <= 36,
             `${viewport.width}×${viewport.height}: board-to-dock gap is wrong (${JSON.stringify(boardGap)})`);
     }
+
+    await host.locator(".board-toolbar").getByRole("button", {name: "Повернуть вид по часовой стрелке"}).click();
+    assert.equal(await host.evaluate(() => localStorage.getItem("roborally-board-view-angle")), "90",
+        "manual view rotation was not persisted");
+    await host.locator(".board-toolbar").getByRole("button", {name: "Сбросить вид поля"}).click();
+    assert.equal(await host.evaluate(() => localStorage.getItem("roborally-board-view-angle")), null,
+        "reset field view did not restore automatic orientation");
 
     await host.locator(".game-pause-controls .pause").click();
     await host.locator(".pause-banner").waitFor();

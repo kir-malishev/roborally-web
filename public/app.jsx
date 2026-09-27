@@ -138,10 +138,7 @@ class BoardHints extends React.Component {
     }
 
     point(event) {
-        const svg = event.currentTarget.ownerSVGElement;
-        const rect = svg.getBoundingClientRect();
-        return {x: Math.max(2, Math.min(98, (event.clientX - rect.left) / rect.width * 100)),
-            y: Math.max(2, Math.min(98, (event.clientY - rect.top) / rect.height * 100))};
+        return {x: event.clientX, y: event.clientY};
     }
 
     show(event, item) {
@@ -241,17 +238,19 @@ class BoardHints extends React.Component {
             if (item.kind === "corner") return <rect {...common} key={`${item.id}-${hit}`} x={item.x} y={item.y} width=".258" height=".258" rx=".04"/>;
             return <circle {...common} key={`${item.id}-${hit}`} cx={item.x} cy={item.y} r={item.r}/>;
         };
-        const tooltipLeft = this.state.x > 68;
-        const tooltipAbove = this.state.y > 78;
+        const tooltipLeft = this.state.x > window.innerWidth - 260;
+        const tooltipAbove = this.state.y > window.innerHeight - 100;
+        const tooltip = enabled && hovered ? ReactDOM.createPortal(
+            <div className={`field-tooltip ${tooltipLeft ? "to-left" : ""} ${tooltipAbove ? "above" : ""}`}
+                style={{left: `${this.state.x}px`, top: `${this.state.y}px`}} role="tooltip">
+                <strong>{hovered.title}</strong><span>{hovered.description}</span>
+            </div>, document.body) : null;
         return <div className={`board-hints ${enabled ? "enabled" : "disabled"}`}>
             <svg viewBox="0 0 12 16" preserveAspectRatio="none" aria-hidden="true">
                 {hovered ? draw(hovered, false) : null}
                 {items.map((item) => draw(item, true))}
             </svg>
-            {enabled && hovered ? <div className={`field-tooltip ${tooltipLeft ? "to-left" : ""} ${tooltipAbove ? "above" : ""}`}
-                style={{left: `${this.state.x}%`, top: `${this.state.y}%`}} role="tooltip">
-                <strong>{hovered.title}</strong><span>{hovered.description}</span>
-            </div> : null}
+            {tooltip}
         </div>;
     }
 }
@@ -1135,6 +1134,42 @@ function FlagMarker({number, className = "", style}) {
     </span>;
 }
 
+const BOARD_VIEW_STORAGE_KEY = "roborally-board-view-angle";
+
+function boardViewClass(angle) {
+    return `rr-view-frame${angle % 180 ? " rr-view-landscape" : ""}`;
+}
+
+function boardViewStyle(angle) {
+    return {"--rr-view-angle": `${angle}deg`};
+}
+
+// Return coordinates in the unchanged 12×16 field, regardless of its screen rotation.
+function boardPointFromView(element, angle, clientX, clientY) {
+    const rect = element.getBoundingClientRect();
+    const u = (clientX - rect.left - element.clientLeft) / element.clientWidth;
+    const v = (clientY - rect.top - element.clientTop) / element.clientHeight;
+    if (u < 0 || u >= 1 || v < 0 || v >= 1) return null;
+    const [x, y] = angle === 90 ? [v, 1 - u] : angle === 180 ? [1 - u, 1 - v]
+        : angle === 270 ? [1 - v, u] : [u, v];
+    return {fx: Math.min(12 - 1e-6, x * 12), fy: Math.min(16 - 1e-6, y * 16)};
+}
+
+function BoardViewControls({app}) {
+    const angle = app.boardViewAngle();
+    const automatic = app.state.boardViewChoice === null;
+    return <div className="rr-view-controls" role="group" aria-label="Повернуть вид поля">
+        <button type="button" aria-label="Повернуть вид против часовой стрелки" title="Повернуть вид против часовой стрелки"
+            onClick={() => app.rotateBoardView(-90)}>↺</button>
+        <span>Вид {angle}°</span>
+        <button type="button" aria-label="Повернуть вид по часовой стрелке" title="Повернуть вид по часовой стрелке"
+            onClick={() => app.rotateBoardView(90)}>↻</button>
+        <button type="button" className={automatic ? "selected" : ""} aria-label="Автоматический ракурс поля"
+            aria-pressed={automatic} title="Авто: на широком экране старт слева, на узком снизу"
+            onClick={() => app.resetBoardViewAngle()}>Авто</button>
+    </div>;
+}
+
 function CourseFieldContents({course, state, flagClassName, showLobbyRobots = false}) {
     const assignments = state.startAssignments || {};
     const startPositions = state.startPositions || [];
@@ -1164,9 +1199,10 @@ function CourseFieldContents({course, state, flagClassName, showLobbyRobots = fa
     </React.Fragment>;
 }
 
-function CourseThumbnail({course, state}) {
-    return <span className="course-thumbnail">
-        <CourseFieldContents course={course} state={state}/>
+function CourseThumbnail({course, state, app}) {
+    const angle = app.boardViewAngle();
+    return <span className={`course-thumbnail ${boardViewClass(angle)}`} style={boardViewStyle(angle)}>
+        <span className="rr-view-canvas"><CourseFieldContents course={course} state={state}/></span>
     </span>;
 }
 
@@ -1562,10 +1598,9 @@ class FieldEditorModal extends React.Component {
     }
 
     point(event) {
-        const box = event.currentTarget.getBoundingClientRect();
-        const fx = (event.clientX - box.left) / box.width * 12;
-        const fy = (event.clientY - box.top) / box.height * 16;
-        if (fx < 0 || fx >= 12 || fy < 0 || fy >= 16) return null;
+        const point = boardPointFromView(event.currentTarget, this.props.app.boardViewAngle(), event.clientX, event.clientY);
+        if (!point) return null;
+        const {fx, fy} = point;
         const x = Math.floor(fx), y = Math.floor(fy);
         const edgeDistances = {north: fy - y, east: x + 1 - fx, south: y + 1 - fy, west: fx - x};
         const side = Object.entries(edgeDistances).sort((a,b) => a[1] - b[1])[0][0];
@@ -1761,6 +1796,7 @@ class FieldEditorModal extends React.Component {
     render() {
         const {state} = this.props;
         const {features, flags} = this.state;
+        const viewAngle = this.props.app.boardViewAngle();
         return <div className="rr-editor-backdrop" onClick={(event) => event.target === event.currentTarget && this.close()}>
             <section className="rr-editor-modal" role="dialog" aria-modal="true" aria-labelledby="rr-editor-title" ref={this.dialogRef}>
                 <header className="rr-editor-heading"><div><h2 id="rr-editor-title">Редактор поля</h2><p>Нарисуйте маршрут конвейера или выберите элемент и щёлкните по клетке.</p></div>
@@ -1778,6 +1814,7 @@ class FieldEditorModal extends React.Component {
                         <span>Основа {this.state.rotation}°</span>
                         <button type="button" aria-label="Повернуть основу по часовой стрелке" onClick={() => this.rotateBoard(true)}>↻</button>
                     </div>
+                    <BoardViewControls app={this.props.app}/>
                     <button type="button" disabled={!this.state.history.length} onClick={() => this.undo()}>↶ Отменить</button>
                     <button type="button" disabled={!this.state.future.length} onClick={() => this.redo()}>↷ Повторить</button>
                     <button type="button" className="rr-editor-clear" onClick={() => this.clearBoard()}
@@ -1792,10 +1829,11 @@ class FieldEditorModal extends React.Component {
                         </button>)}
                     </div>
                     <div className="rr-editor-board-column">
-                        <div className="rr-editor-board" role="img" aria-label="Редактируемое поле 12 на 16 клеток"
+                        <div className={`rr-editor-board ${boardViewClass(viewAngle)}`} style={boardViewStyle(viewAngle)}
+                            role="img" aria-label="Редактируемое поле 12 на 16 клеток"
                             onPointerDown={(event) => this.beginDraw(event)} onPointerMove={(event) => this.continueDraw(event)}
                             onPointerUp={(event) => this.finishDraw(event)} onPointerCancel={() => { this.drag = null; this.setState({drawing: []}); }}>
-                            <div className="rr-editor-factory"><CustomFactoryArt features={features}
+                            <div className="rr-view-canvas"><div className="rr-editor-factory"><CustomFactoryArt features={features}
                                 starts={state.startTemplates?.[this.state.start]?.starts || []}/>
                                 {flags.map(([x,y], index) => <FlagMarker key={`${x},${y}`} className="rr-editor-flag"
                                     number={index + 1} style={{left: `${(x+.5)/12*100}%`, top: `${(y+.5)/16*100}%`}}/>)}
@@ -1803,7 +1841,7 @@ class FieldEditorModal extends React.Component {
                                     const [x,y] = keyPoint(key);
                                     return <i key={key} className="rr-editor-drawing" style={customCellStyle(x,y,16)}/>;
                                 })}
-                            </div>
+                            </div></div>
                         </div>
                     </div>
                     <div className="rr-editor-inspector">
@@ -1902,6 +1940,7 @@ class CourseSetup extends React.Component {
 
     render() {
         const {state, app, playerCount, readOnly} = this.props;
+        const viewAngle = app.boardViewAngle();
         const quickBoard = standardBoardName(state, this.state.board);
         const selected = state.course.id;
         const previewFlags = this.state.flags;
@@ -1938,7 +1977,7 @@ class CourseSetup extends React.Component {
                                 this.setState({inspectedCourseId: course.id});
                                 if (!readOnly && selected !== course.id) app.socket.emit("select-course", course.id);
                             }}>
-                            <CourseThumbnail course={course} state={state}/>
+                            <CourseThumbnail course={course} state={state} app={app}/>
                             <span className="course-card-copy"><strong>{course.name}</strong><span>{course.board} · {course.length}</span>
                                 <small>{course.players} игроков · {course.level}</small>
                                 <span className="course-card-badges">{selected === course.id ? <b className="course-selected-badge">Выбран</b> : null}
@@ -1948,11 +1987,13 @@ class CourseSetup extends React.Component {
                     })}{!visibleCourses.length ? <p className="course-empty">Курсы по этому фильтру не найдены.</p> : null}</div>
                     <section className="selected-course-preview" aria-live="polite">
                         <div className="selected-course-heading"><div><small>Просмотр курса</small><strong>{inspectedCourse.name}</strong>
-                            <span>{inspectedCourse.board} · {inspectedCourse.players} игроков · {inspectedCourse.level}</span></div></div>
+                            <span>{inspectedCourse.board} · {inspectedCourse.players} игроков · {inspectedCourse.level}</span></div>
+                            <BoardViewControls app={app}/></div>
                         <div className={`selected-course-body ${inspectedCourse.specialRules ? "has-special-rules" : ""}`}>
                             <div className="course-preview-group">
-                                <div className="large-course-preview"><CourseFieldContents course={inspectedCourse} state={state}
-                                    flagClassName="large-preview-flag" showLobbyRobots={inspectedIsSelected}/></div>
+                                <div className={`large-course-preview ${boardViewClass(viewAngle)}`} style={boardViewStyle(viewAngle)}>
+                                    <div className="rr-view-canvas"><CourseFieldContents course={inspectedCourse} state={state}
+                                        flagClassName="large-preview-flag" showLobbyRobots={inspectedIsSelected}/></div></div>
                                 {inspectedIsSelected ? <div className="course-start-controls">
                                     <div className="course-start-list" aria-label="Стартовые позиции">
                                         {state.playerSlots.filter(Boolean).map((userId) => <span className="course-start-chip" key={userId}
@@ -1987,23 +2028,19 @@ class CourseSetup extends React.Component {
                     <label>Старт<select value={this.state.start} onChange={(event) => this.setState({start: event.target.value})}>{state.startCards.map((start) => <option value={start} key={start}>{start.replace(".jpg", "")}</option>)}</select></label>
                     <label>Поворот карты<select value={this.state.rotation} onChange={(event) => this.setState({rotation: Number(event.target.value)})}>
                         {[0,90,180,270].map((rotation) => <option value={rotation} key={rotation}>{rotation}°</option>)}</select></label>
+                    <BoardViewControls app={app}/>
                 </div>
-                <div className="constructor-preview"
+                <div className={`constructor-preview ${boardViewClass(viewAngle)}`} style={boardViewStyle(viewAngle)}
                     onClick={(event) => {
-                        const rect = event.currentTarget.getBoundingClientRect();
-                        const factoryHeight = rect.height * .75;
-                        const relativeY = event.clientY - rect.top;
-                        if (relativeY < 0 || relativeY >= factoryHeight) return;
-                        const x = Math.min(11, Math.floor((event.clientX - rect.left) / rect.width * 12));
-                        const y = Math.min(11, Math.floor(relativeY / factoryHeight * 12));
-                        this.toggleFlag(x, y);
-                    }}><img className="constructor-preview-board constructor-preview-factory" style={{transform: `rotate(${this.state.rotation}deg)`}}
+                        const point = boardPointFromView(event.currentTarget, viewAngle, event.clientX, event.clientY);
+                        if (point && point.fy < 12) this.toggleFlag(Math.floor(point.fx), Math.floor(point.fy));
+                    }}><div className="rr-view-canvas"><img className="constructor-preview-board constructor-preview-factory" style={{transform: `rotate(${this.state.rotation}deg)`}}
                         src={boardImageUrl(state, quickBoard)}/>
                     <img className="constructor-preview-board constructor-preview-start"
                         src={startImageUrl(state, this.state.start)}/>
                     {previewFlags.map(([x, y], index) => <b className="preview-flag" key={`${x},${y},${index}`}
                         style={{left: `${(x + .5) / 12 * 100}%`, top: `${(y + .5) / 16 * 100}%`}}>{index + 1}</b>)}
-                </div>
+                </div></div>
                 <p className="constructor-help">Щелчок ставит флаг; повторный щелчок по клетке убирает его.</p>
                 <div className="flag-editor"><div className="flag-editor-heading"><strong>Порядок флагов</strong><span>{previewFlags.length}/8</span></div>
                     {previewFlags.length ? previewFlags.map(([x, y], index) => <div className="flag-editor-row" key={`${x},${y},${index}`}>
@@ -2281,9 +2318,12 @@ class Game extends React.Component {
         const storedScale = Number(localStorage.getItem("roborally-board-scale"));
         const boardScale = Number.isInteger(storedScale) && storedScale >= 30 && storedScale <= 200 && storedScale % 10 === 0
             ? storedScale : 50;
+        const storedView = localStorage.getItem(BOARD_VIEW_STORAGE_KEY);
+        const boardViewChoice = ["0","90","180","270"].includes(storedView) ? Number(storedView) : null;
         const boardHintsEnabled = localStorage.getItem("roborally-board-hints") !== "false";
         this.state = {inited: false, phase: "loading", playerNames: {}, playerSlots: [], robots: [], log: [], flags: [],
             boardScale, boardPanX: 0, boardPanY: 0, boardPanMode: false, boardHintsEnabled,
+            boardViewChoice, boardViewWindowWidth: window.innerWidth,
             hudCollapsed: window.innerWidth <= 760, bottomDockCollapsed: false, guideOpen: false, conveyorGuideOpen: false, gameSettingsOpen: false,
             programmingCueActive: false, timerCueActive: false};
         this.privateState = {hand: [], selected: [], locked: false};
@@ -2294,6 +2334,7 @@ class Game extends React.Component {
         this.openGameSettings = this.openGameSettings.bind(this);
         this.closeGameSettings = this.closeGameSettings.bind(this);
         this.setBottomDockRef = this.setBottomDockRef.bind(this);
+        this.updateBoardViewWidth = this.updateBoardViewWidth.bind(this);
     }
 
     openGuide(event) {
@@ -2340,6 +2381,27 @@ class Game extends React.Component {
         this.setState({boardScale: normalized, boardPanX: 0, boardPanY: 0});
     }
 
+    boardViewAngle() {
+        return this.state.boardViewChoice === null
+            ? (this.state.boardViewWindowWidth >= 1000 ? 90 : 0) : this.state.boardViewChoice;
+    }
+
+    rotateBoardView(delta) {
+        const angle = (this.boardViewAngle() + delta + 360) % 360;
+        localStorage.setItem(BOARD_VIEW_STORAGE_KEY, String(angle));
+        this.setState({boardViewChoice: angle, boardPanX: 0, boardPanY: 0});
+    }
+
+    resetBoardViewAngle() {
+        localStorage.removeItem(BOARD_VIEW_STORAGE_KEY);
+        this.setState({boardViewChoice: null, boardPanX: 0, boardPanY: 0});
+    }
+
+    updateBoardViewWidth() {
+        if (this.state.boardViewWindowWidth !== window.innerWidth)
+            this.setState({boardViewWindowWidth: window.innerWidth, boardPanX: 0, boardPanY: 0});
+    }
+
     resetBoardPosition() {
         this.boardPanDrag = null;
         this.setState({boardPanX: 0, boardPanY: 0, boardPanning: false});
@@ -2347,7 +2409,8 @@ class Game extends React.Component {
 
     resetBoardView() {
         localStorage.setItem("roborally-board-scale", "50");
-        this.setState({boardScale: 50, boardPanX: 0, boardPanY: 0, boardPanMode: false});
+        localStorage.removeItem(BOARD_VIEW_STORAGE_KEY);
+        this.setState({boardScale: 50, boardPanX: 0, boardPanY: 0, boardPanMode: false, boardViewChoice: null});
     }
 
     beginBoardPan(event) {
@@ -2388,6 +2451,7 @@ class Game extends React.Component {
     }
 
     componentDidMount() {
+        window.addEventListener("resize", this.updateBoardViewWidth);
         const initArgs = CommonRoom.roomInit(this);
         this.socket.on("state", (state) => {
             CommonRoom.processCommonRoom(state, this.state, {
@@ -2442,6 +2506,7 @@ class Game extends React.Component {
     }
 
     componentWillUnmount() {
+        window.removeEventListener("resize", this.updateBoardViewWidth);
         clearTimeout(this.programmingCueTimeout);
         clearTimeout(this.timerCueTimeout);
         if (this.bottomDockObserver) this.bottomDockObserver.disconnect();
@@ -2459,6 +2524,8 @@ class Game extends React.Component {
         const historyReview = state.historyReview || {actual: true, playing: false, revision: 0};
         const reviewingHistory = state.paused && !historyReview.actual;
         const replayKey = reviewingHistory ? `history-${historyReview.revision}` : "live";
+        const viewAngle = this.boardViewAngle();
+        const viewScale = state.boardScale * (viewAngle % 180 ? 4 / 3 : 1);
         return <React.Fragment>
         <CommonRoom state={state} app={this}/>
         <HostControls app={this} data={state} timerControls={[]}
@@ -2473,13 +2540,14 @@ class Game extends React.Component {
                 {!isPlayer ? <ProgrammingTimer state={state}/> : null}
                 <section className="game-layout">
                     <div className="board-column">
-                        <div className={`board-viewport ${state.boardPanMode ? "pan-enabled" : ""} ${state.boardPanning ? "panning" : ""}`}
-                            style={{width: `${Math.min(state.boardScale, 100)}%`}}
+                        <div className={`board-viewport ${viewAngle % 180 ? "rr-view-landscape" : ""} ${state.boardPanMode ? "pan-enabled" : ""} ${state.boardPanning ? "panning" : ""}`}
+                            style={{width: `${Math.min(viewScale, 100)}%`}}
                             onPointerDown={(event) => this.beginBoardPan(event)} onPointerMove={(event) => this.moveBoardPan(event)}
                             onPointerUp={(event) => this.endBoardPan(event)} onPointerCancel={(event) => this.endBoardPan(event)}>
-                        <div className="board-wrap" style={{width: `${state.boardScale > 100 ? state.boardScale : 100}%`,
+                        <div className={`board-wrap ${boardViewClass(viewAngle)}`} style={{...boardViewStyle(viewAngle),
+                            width: `${Math.max(viewScale, 100)}%`,
                             transform: `translate(${state.boardPanX}px, ${state.boardPanY}px)`}}>
-                            <div className="board" aria-label={`Игровое поле ${state.board.name}`}>
+                            <div className="board rr-view-canvas" aria-label={`Игровое поле ${state.board.name}`}>
                             {state.course.customFeatures ? <div className={`factory-card ${state.course.customFeatures.fullField ? "rr-full-field" : ""}`}>
                                 <CustomFactoryArt features={state.course.customFeatures}
                                     starts={(state.startTemplates?.[state.board.start]?.starts || [])}/></div>
@@ -2523,7 +2591,8 @@ class Game extends React.Component {
                         <GamePauseControls state={state} app={this}/>
                         </div>
                         <div className="rr-hud-footer">
-                        <div className="board-toolbar rr-panel" aria-label="Масштаб игрового поля">
+                        <div className="board-toolbar rr-panel" aria-label="Управление видом поля">
+                            <div className="rr-board-toolbar-main">
                             <button type="button" title="Уменьшить поле" aria-label="Уменьшить поле"
                                 disabled={state.boardScale <= 30} onClick={() => this.setBoardScale(state.boardScale - 10)}>−</button>
                             <span>{state.boardScale}%</span>
@@ -2543,6 +2612,8 @@ class Game extends React.Component {
                                     localStorage.setItem("roborally-board-hints", String(enabled));
                                     this.setState({boardHintsEnabled: enabled});
                                 }}>?</button>
+                            </div>
+                            <BoardViewControls app={this}/>
                         </div>
                         <section className="rr-panel stage" role="status"><h2>{state.phase === "resolving" ? `Регистр ${state.register} / 5` : "Сейчас"}</h2>
                             <p>{reviewingHistory ? `Журнал: ${state.stage}` : state.paused ? "Игра на паузе" : state.phase === "resolving" ? state.stage : state.phase === "programming" ? "Выбор программы" : state.phase === "reentry" ? "Возрождение роботов" : state.phase === "power-down-choice" ? "Решение Power Down" : "Заезд завершён"}</p></section>

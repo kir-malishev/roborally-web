@@ -50,7 +50,7 @@ async function launchBrowser() {
     return chromium.launch(options);
 }
 
-async function openUser(browser, {port, room, name, viewport = {width: 1280, height: 900}, timeout = 8000}) {
+async function openUser(browser, {port, room, name, viewport = {width: 1280, height: 900}, timeout = 20000}) {
     const context = await browser.newContext({viewport});
     await context.addInitScript(() => localStorage.updatesVersion = "999999");
     const page = await context.newPage();

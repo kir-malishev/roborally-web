@@ -185,11 +185,11 @@ async function openUser(id, name) {
         "Host transfer is not marked with a key");
     await guestRow.locator('[aria-label="Передать хоста"]').click();
     await host.page.locator(".popup_modals .btn_pmry").click();
-    await guest.page.locator(".lobby-start", {hasText: "Курс и состав готовы"}).waitFor();
+    await guest.page.locator(".rr-lobby-next-step", {hasText: "Курс и состав готовы"}).waitFor();
     const formerHostRow = guest.page.locator(".lobby-member", {hasText: "Хост"});
     await formerHostRow.locator('[aria-label="Передать хоста"]').click();
     await guest.page.locator(".popup_modals .btn_pmry").click();
-    await host.page.locator(".lobby-start", {hasText: "Курс и состав готовы"}).waitFor();
+    await host.page.locator(".rr-lobby-next-step", {hasText: "Курс и состав готовы"}).waitFor();
     await guest.page.getByRole("button", {name: "Стать зрителем"}).click();
     await host.page.locator(".member-column", {hasText: "Зрители"}).locator(".lobby-member", {hasText: "Механик"}).waitFor();
     await guest.page.getByRole("button", {name: "Присоединиться к игре"}).click();
@@ -436,7 +436,10 @@ async function openUser(id, name) {
     await viewer.page.locator(".programming-timer").waitFor();
     await host.page.locator(".bottom-dock.rr-dock-timer").waitFor();
     assert.equal(await viewer.page.locator(".timer-clock strong").innerText(), "30", "spectator cannot see the shared countdown");
-    assert.equal(await guest.page.locator(".programming-timer").count(), 0, "last player still sees a timer over the board");
+    await host.page.locator(".programming-timer").waitFor();
+    await guest.page.locator(".programming-timer").waitFor();
+    assert.equal(await host.page.locator(".timer-clock strong").innerText(), "30", "ready player cannot see the shared countdown");
+    assert.equal(await guest.page.locator(".timer-clock strong").innerText(), "30", "last player cannot see the shared countdown");
     assert(/^ВАШИ \d+ СЕКУНД$/.test(await guest.page.locator(".bottom-dock .rr-dock-status-text").innerText()),
         "last player does not see that the countdown targets them");
     const observerTimerText = await host.page.locator(".bottom-dock .rr-dock-status-text").innerText();

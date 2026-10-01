@@ -24,7 +24,7 @@ let browser;
         await host.waitForFunction((landscape) => document.querySelector(".board-viewport")
             ?.classList.contains("rr-view-landscape") === landscape, viewport.width >= 1000);
         await host.waitForFunction((compact) => document.querySelector(".roborally-app")
-            ?.classList.contains("rr-docks-compact") === compact, viewport.width <= 760);
+            ?.classList.contains("rr-docks-compact") === compact, viewport.width < 1000);
         const view = await host.locator(".board-viewport").evaluate((element) => {
             const frame = element.getBoundingClientRect();
             const start = element.querySelector(".start-card").getBoundingClientRect();
@@ -166,6 +166,14 @@ let browser;
     await dragDock("info", "left");
     await dragDock("program", "right");
     assert.deepStrictEqual(await dockState(), {info: "left", program: "right", compact: false});
+    await host.getByRole("button", {name: "Авто", exact: true}).click();
+    await host.waitForFunction(() => [...document.querySelectorAll(".register span")].every((span) => span.title));
+    const sideRegisters = await host.locator(".registers").evaluate((registers) => ({
+        columns: getComputedStyle(registers).gridTemplateColumns.split(" ").length,
+        allReadable: [...registers.querySelectorAll(".register span")].every((span) => span.scrollWidth <= span.clientWidth + 1)
+    }));
+    assert.deepStrictEqual(sideRegisters, {columns: 1, allReadable: true},
+        `Side register labels are clipped: ${JSON.stringify(sideRegisters)}`);
     let docks = await dockBoxes();
     assert(docks.info.right <= docks.board.left + 1 && docks.board.right <= docks.program.left + 1,
         `side docks cover the board: ${JSON.stringify(docks)}`);
@@ -321,7 +329,7 @@ let browser;
     for (const viewport of [{width: 1440, height: 900}, {width: 1024, height: 650}, {width: 390, height: 760}]) {
         await host.setViewportSize(viewport);
         await host.waitForFunction((compact) => document.querySelector(".roborally-app")
-            ?.classList.contains("rr-docks-compact") === compact, viewport.width <= 760);
+            ?.classList.contains("rr-docks-compact") === compact, viewport.width < 1000);
         const banner = await host.locator(".pause-banner").evaluate((element) => {
             const box = element.getBoundingClientRect();
             return {inside: box.left >= -1 && box.right <= innerWidth + 1 && box.top >= 0,

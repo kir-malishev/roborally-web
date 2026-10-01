@@ -825,27 +825,31 @@ class Lobby extends React.Component {
         const robotColors = state.robotColors || LOBBY_ROBOT_COLORS;
         const colorFor = (userId) => playerColors[userId] || robotColors[Math.max(0, state.playerSlots.indexOf(userId))];
         const canStart = playerCount >= 2 && playerCount >= state.course.min && playerCount <= state.course.max;
+        const missingPlayers = Math.max(2, state.course.min) - playerCount;
+        const startHint = canStart ? (isHost ? "Курс и состав готовы — можно начинать" : "Все готовы к старту. Ожидаем хоста")
+            : missingPlayers > 0 ? `Для старта нужно ещё игроков: ${missingPlayers}`
+            : `На этом курсе максимум ${state.course.max} игроков. Выберите другой курс`;
         const usedColors = new Set(players.filter((userId) => userId !== state.userId)
             .map(colorFor));
         return <section className="lobby-shell lobby">
             <section className="lobby-intro rr-panel">
                 <div className="lobby-intro-title"><div><h2>Лобби · {state.roomId}</h2>
-                    <p>{isPlayer ? "Вы участвуете в заезде" : "Вы смотрите за подготовкой"}</p></div>
+                    <p>{isHost ? "Вы хост · " : ""}{isPlayer ? "Вы участвуете в заезде" : "Вы смотрите за подготовкой"}</p></div>
                     <div className="lobby-intro-links"><button type="button" className="lobby-guide-button" onClick={this.props.onOpenGuide}>Как играть</button>
                     <button type="button" className="lobby-settings-button" onClick={this.props.onOpenSettings}>⚙ Настройки</button></div></div>
                 <div className="lobby-primary-actions"><div className="role-actions" aria-label="Роль в комнате">
-                        <button className={`lobby-role-button ${isPlayer ? "primary current-role" : ""}`} disabled={isPlayer || playerCount >= 8}
+                        <button className={`lobby-role-button ${isPlayer ? "current-role" : "primary"}`} disabled={isPlayer || playerCount >= 8}
                             onClick={() => app.socket.emit("join-game")}>
                             {isPlayer ? "Вы в игре ✓" : "Присоединиться к игре"}</button>
-                        <button className={`lobby-role-button ${!isPlayer ? "primary current-role" : ""}`} disabled={!isPlayer}
+                        <button className={`lobby-role-button ${!isPlayer ? "current-role" : ""}`} disabled={!isPlayer}
                             onClick={() => app.socket.emit("spectators-join")}>{isPlayer ? "Стать зрителем" : "Вы зритель"}</button>
                     </div>
                     <section className="lobby-start">
-                        {isHost ? <><button className="primary" disabled={!canStart} onClick={() => app.socket.emit("start-game")}>Начать игру</button>
-                            <p>{canStart ? "Курс и состав готовы" : `Нужно игроков: ${state.course.players}`}</p></>
+                        {isHost ? <button className="primary" aria-describedby="rr-lobby-next-step" disabled={!canStart} onClick={() => app.socket.emit("start-game")}>Начать игру</button>
                             : <span className="lobby-start-placeholder">Игру начнёт хост</span>}
                     </section>
                 </div>
+                <p className="rr-lobby-next-step" id="rr-lobby-next-step" role="status">{startHint}</p>
             </section>
             <section className="lobby-members rr-panel">
                 <div className="member-column"><h3>Игроки <small>{playerCount}/8</small></h3>
@@ -869,7 +873,7 @@ class Lobby extends React.Component {
                         className={colorFor(state.userId) === color ? "selected" : ""}
                         style={{"--swatch": color}} disabled={usedColors.has(color)}
                         title={usedColors.has(color) ? "Цвет занят" : "Выбрать цвет"}
-                        aria-label={`Цвет ${color}`} onClick={() => app.socket.emit("select-color", color)}></button>)}</div>
+                        aria-label={`Цвет ${color}`} aria-pressed={colorFor(state.userId) === color} onClick={() => app.socket.emit("select-color", color)}>{colorFor(state.userId) === color ? "✓" : ""}</button>)}</div>
                 </div> : null}
             </section>
             <CourseSetup state={state} app={app} playerCount={playerCount} readOnly={!isHost}/>
@@ -1998,7 +2002,7 @@ class CourseSetup extends React.Component {
             <div className="selected-course-strip"><div><small>Выбран для игры</small><strong>{state.course.name}</strong>
                     <span>{state.course.board} · {state.course.players} игроков · {state.course.length}</span></div>
                 <span className="selected-course-actions">
-                    {!inspectedIsSelected ? <button type="button" onClick={() => this.setState({inspectedCourseId: selected})}>Показать выбранный</button> : null}
+                    {readOnly && !inspectedIsSelected ? <button type="button" onClick={() => this.setState({inspectedCourseId: selected})}>Показать выбранный</button> : null}
                     {readOnly ? <em>Курс выбирает хост</em> : null}
                 </span></div>
             <details className="lobby-fold course-browser" open={this.state.catalogOpen}
@@ -2377,7 +2381,7 @@ class Game extends React.Component {
             boardViewportWidth: null, boardZoomSteps: 0, boardHintsEnabled,
             boardViewChoice, boardViewWindowWidth: window.innerWidth, infoDock, programDock,
             draggedDock: null, dockDropEdge: null,
-            hudCollapsed: window.innerWidth <= 760, bottomDockCollapsed: false, guideOpen: false, conveyorGuideOpen: false, gameSettingsOpen: false,
+            hudCollapsed: window.innerWidth < 1000, bottomDockCollapsed: false, guideOpen: false, conveyorGuideOpen: false, gameSettingsOpen: false,
             programmingCueActive: false, timerCueActive: false};
         this.privateState = {hand: [], selected: [], locked: false};
         this.openGuide = this.openGuide.bind(this);
@@ -2532,7 +2536,7 @@ class Game extends React.Component {
     effectiveDockPositions(showProgramDock = true) {
         const {infoDock, programDock, boardViewWindowWidth} = this.state;
         const bothSide = showProgramDock && ["left", "right"].includes(infoDock) && ["left", "right"].includes(programDock);
-        const compact = boardViewWindowWidth <= 760 || (bothSide && boardViewWindowWidth < 1200);
+        const compact = boardViewWindowWidth < 1000 || (bothSide && boardViewWindowWidth < 1200);
         if (!compact) return {info: infoDock, program: programDock, compact};
         const info = infoDock === "bottom" ? "bottom" : "top";
         let program = programDock === "top" ? "top" : "bottom";
@@ -2558,7 +2562,10 @@ class Game extends React.Component {
 
     updateBoardViewWidth() {
         if (this.state.boardViewWindowWidth !== window.innerWidth)
-            this.setState({boardViewWindowWidth: window.innerWidth});
+            this.setState({boardViewWindowWidth: window.innerWidth,
+                ...(this.state.boardViewWindowWidth >= 1000 && window.innerWidth < 1000 && !this.state.paused
+                    ? {hudCollapsed: true} : this.state.boardViewWindowWidth < 1000 && window.innerWidth >= 1000
+                    ? {hudCollapsed: false} : {})});
         this.scheduleBoardFit();
     }
 
@@ -2668,7 +2675,7 @@ class Game extends React.Component {
                     </div>
                 </div> : null}
                 <PauseBanner state={state}/>
-                {!isPlayer ? <ProgrammingTimer state={state}/> : null}
+                <ProgrammingTimer state={state}/>
                 <section className="game-layout">
                     <div className="board-column" ref={this.setBoardColumnRef}>
                         <div className={`board-viewport ${viewAngle % 180 ? "rr-view-landscape" : ""}`}

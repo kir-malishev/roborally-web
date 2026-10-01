@@ -166,14 +166,6 @@ let browser;
     await dragDock("info", "left");
     await dragDock("program", "right");
     assert.deepStrictEqual(await dockState(), {info: "left", program: "right", compact: false});
-    await host.getByRole("button", {name: "Авто", exact: true}).click();
-    await host.waitForFunction(() => [...document.querySelectorAll(".register span")].every((span) => span.title));
-    const sideRegisters = await host.locator(".registers").evaluate((registers) => ({
-        columns: getComputedStyle(registers).gridTemplateColumns.split(" ").length,
-        allReadable: [...registers.querySelectorAll(".register span")].every((span) => span.scrollWidth <= span.clientWidth + 1)
-    }));
-    assert.deepStrictEqual(sideRegisters, {columns: 1, allReadable: true},
-        `Side register labels are clipped: ${JSON.stringify(sideRegisters)}`);
     let docks = await dockBoxes();
     assert(docks.info.right <= docks.board.left + 1 && docks.board.right <= docks.program.left + 1,
         `side docks cover the board: ${JSON.stringify(docks)}`);

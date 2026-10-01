@@ -571,6 +571,7 @@ function init(wsServer, gamePath) {
                 playerSlots: Array(8).fill(null),
                 playerColors: {},
                 startAssignments: {},
+                raceExcludedPlayers: new JSONSet(),
                 onlinePlayers: new JSONSet(),
                 spectators: new JSONSet(),
                 robots: [],
@@ -613,15 +614,18 @@ function init(wsServer, gamePath) {
         }
 
         publicPlayerStats() {
-            return Object.fromEntries(Object.entries(this.players).map(([userId, player]) => [userId, {
-                damage: player.damage,
-                lives: player.lives,
-                checkpoints: player.checkpoints,
-                finished: !!player.finished,
-                ready: !!player.locked,
-                poweredDown: player.poweredDown,
-                powerDownNextRound: player.powerDownNextRound,
-            }]));
+            return Object.fromEntries(this.room.playerSlots.filter((userId) => userId && this.players[userId]).map((userId) => {
+                const player = this.players[userId];
+                return [userId, {
+                    damage: player.damage,
+                    lives: player.lives,
+                    checkpoints: player.checkpoints,
+                    finished: !!player.finished,
+                    ready: !!player.locked,
+                    poweredDown: player.poweredDown,
+                    powerDownNextRound: player.powerDownNextRound,
+                }];
+            }));
         }
 
         publicRobots() {
@@ -986,6 +990,83 @@ function init(wsServer, gamePath) {
                 && new Set(positions).size === users.length;
         }
 
+        createPlayer() {
+            return {
+                hand: [], selected: Array(5).fill(null), registers: [], lockedRegisters: [], locked: false,
+                autoFilledRegisters: [],
+                damage: this.specialRules.startingDamage || 0, lives: this.room.gameOptions.startingLives,
+                checkpoints: 0, poweredDown: false, powerDownIntent: false,
+                powerDownNextRound: false, powerDownContinuation: null, powerDownDamage: 0,
+                powerDownReentryChoiceRequired: false, finished: false
+            };
+        }
+
+        joinPausedGame(userId) {
+            if (!this.room.onlinePlayers.has(userId) || this.room.playerSlots.includes(userId)) return;
+            if (this.room.raceExcludedPlayers.has(userId))
+                return this.userRegistry.send(userId, "message", "Хост исключил вас из текущего заезда. Вы можете остаться зрителем.");
+            const slot = this.room.playerSlots.indexOf(null);
+            if (slot < 0) return this.userRegistry.send(userId, "message", "В игре уже заняты все восемь мест.");
+            const startLayout = START_LAYOUTS[this.room.course.start] || START_LAYOUTS[START_CARDS[1]];
+            const usedStarts = new Set(this.room.playerSlots.filter(Boolean).map((id) => this.room.startAssignments[id]));
+            const playerCount = this.room.playerSlots.filter(Boolean).length;
+            const start = !usedStarts.has(playerCount) ? playerCount
+                : startLayout.starts.findIndex((position, index) => position && !usedStarts.has(index));
+            if (start < 0 || !startLayout.starts[start]) return;
+            if (this.historyViewFrame) this.resetHistoryReview(false);
+            const usedColors = new Set(this.room.playerSlots.filter(Boolean).map((id) => this.room.playerColors[id]));
+            const color = ROBOT_COLORS.find((item) => !usedColors.has(item));
+            this.room.playerSlots[slot] = userId;
+            this.room.spectators.delete(userId);
+            this.room.startAssignments[userId] = start;
+            this.room.playerColors[userId] = color;
+            this.room.robots.push({userId, slot: start, x: startLayout.starts[start].x,
+                y: startLayout.starts[start].y, direction: "north", headingTurns: 0,
+                color, eliminated: false, archive: {...startLayout.starts[start]}});
+            this.players[userId] = this.createPlayer();
+            if (this.room.phase === "programming") {
+                this.deal(userId);
+                this.cancelProgrammingTimer();
+            } else {
+                // The current register has already been dealt; join the next round.
+                this.players[userId].locked = true;
+            }
+            this.addLog(`${this.playerName(userId)} вступил в заезд на стартовой клетке ${start + 1}.`);
+            this.update();
+        }
+
+        leavePausedGame(userId) {
+            const slot = this.room.playerSlots.indexOf(userId);
+            if (slot < 0) return;
+            if (this.historyViewFrame) this.resetHistoryReview(false);
+            const robot = this.getRobot(userId);
+            if (robot) robot.withdrawn = true; // Pending register actions may still hold this reference.
+            this.room.robots = this.room.robots.filter((item) => item.userId !== userId);
+            this.room.playerSlots[slot] = null;
+            this.room.spectators.add(userId);
+            this.room.finishOrder = this.room.finishOrder.filter((id) => id !== userId);
+            delete this.room.startAssignments[userId];
+            delete this.room.playerColors[userId];
+            const player = this.players[userId];
+            if (player) this.discardProgram(player);
+            delete this.players[userId];
+            this.powerDownChoiceUsers = (this.powerDownChoiceUsers || []).filter((id) => id !== userId);
+            if (this.powerDownChoices) this.powerDownChoices.delete(userId);
+            if (Array.isArray(this.room.reentryQueue))
+                this.room.reentryQueue = this.room.reentryQueue.filter((id) => id !== userId);
+            if (this.room.phase === "programming") this.cancelProgrammingTimer();
+            this.addLog(`${this.playerName(userId)} перешёл в зрители.`);
+            if (this.room.phase === "power-down-choice") return this.completePowerDownChoice();
+            if (this.room.phase === "reentry" && this.room.reentryUserId === userId) {
+                this.room.reentryUserId = this.room.reentryQueue[0] || null;
+                if (!this.room.reentryUserId) {
+                    this.room.reentryQueue = [];
+                    return this.startRound();
+                }
+            }
+            this.update();
+        }
+
         update() {
             this.room.serverTime = Date.now();
             this.userRegistry.send(this.room.onlinePlayers, "state", this.publicState());
@@ -1003,6 +1084,7 @@ function init(wsServer, gamePath) {
             if (slot >= 0) {
                 if (playerId === this.room.hostId)
                     return this.userRegistry.send(this.room.hostId, "message", "Сначала передайте роль хоста другому участнику.");
+                if (this.room.phase !== "lobby") this.room.raceExcludedPlayers.add(playerId);
                 this.room.playerSlots[slot] = null;
                 this.room.spectators.add(playerId);
                 if (this.room.phase === "lobby") {
@@ -1043,7 +1125,7 @@ function init(wsServer, gamePath) {
                     }
                     if (this.room.phase === "programming") {
                         this.cancelProgrammingTimer();
-                        if (this.areAllProgramsLocked()) {
+                        if (this.areAllProgramsLocked() && !this.room.paused) {
                             this.update();
                             this.resolveRound().catch((error) => {
                                 this.addLog(`Ошибка разрешения хода: ${error.message}`);
@@ -1242,7 +1324,7 @@ function init(wsServer, gamePath) {
             this.addLog(`Раунд ${this.room.round}: выберите пять карт программы.`);
             this.maybeStartProgrammingTimer();
             this.update();
-            if (this.areAllProgramsLocked())
+            if (!this.room.paused && this.areAllProgramsLocked())
                 setTimeout(() => this.resolveRound().catch((error) => {
                     this.addLog(`Ошибка разрешения хода: ${error.message}`);
                     this.room.phase = "programming";
@@ -1254,6 +1336,7 @@ function init(wsServer, gamePath) {
             this.cancelProgrammingTimer();
             this.cancelAutoFillResolution();
             this.clearTurnHistory();
+            this.room.raceExcludedPlayers.clear();
             this.room.paused = false;
             this.releasePauseWaiters();
             const users = this.room.playerSlots.filter(Boolean);
@@ -1286,14 +1369,7 @@ function init(wsServer, gamePath) {
                 };
             });
             users.forEach((userId) => {
-                this.players[userId] = {
-                    hand: [], selected: Array(5).fill(null), registers: [], lockedRegisters: [], locked: false,
-                    autoFilledRegisters: [],
-                    damage: this.specialRules.startingDamage || 0, lives: this.room.gameOptions.startingLives,
-                    checkpoints: 0, poweredDown: false, powerDownIntent: false,
-                    powerDownNextRound: false, powerDownContinuation: null, powerDownDamage: 0,
-                    powerDownReentryChoiceRequired: false, finished: false
-                };
+                this.players[userId] = this.createPlayer();
             });
             this.deck = shuffle(makeDeck());
             this.discard = [];
@@ -1972,6 +2048,7 @@ function init(wsServer, gamePath) {
             const resolutionId = (this.resolutionId || 0) + 1;
             this.resolutionId = resolutionId;
             const activeUsers = this.room.playerSlots.filter(Boolean);
+            const participants = new Map(activeUsers.map((userId) => [userId, this.players[userId]]));
             this.confirmPowerDownIntents(activeUsers);
             this.room.resolution = [];
             for (let register = 0; register < 5 && this.room.phase === "resolving" && this.resolutionId === resolutionId; register++) {
@@ -1980,7 +2057,8 @@ function init(wsServer, gamePath) {
                 this.room.revealedRegisters = register + 1;
                 this.beginHistoryRegister(register + 1);
                 await this.showStage(`Регистр ${register + 1}: карты открыты`, 500);
-                const actions = activeUsers.map((userId) => ({
+                const actions = activeUsers.filter((userId) => this.room.playerSlots.includes(userId)
+                    && this.players[userId] === participants.get(userId)).map((userId) => ({
                     userId,
                     player: this.players[userId],
                     robot: this.getRobot(userId),
@@ -2031,6 +2109,7 @@ function init(wsServer, gamePath) {
             this.finishHistoryRound();
             activeUsers.forEach((userId) => {
                 const player = this.players[userId];
+                if (!this.room.playerSlots.includes(userId) || player !== participants.get(userId)) return;
                 if (player.poweredDown) {
                     player.hand = [];
                     player.locked = true;
@@ -2097,6 +2176,8 @@ function init(wsServer, gamePath) {
                 if (this.room.phase === "programming")
                     this.maybeStartProgrammingTimer();
                 this.releasePauseWaiters();
+                if (this.room.phase === "programming" && this.areAllProgramsLocked())
+                    this.resolveRound().catch((error) => this.registry.log(`roborally resolve: ${error.stack}`));
             }
             return true;
         }
@@ -2148,7 +2229,7 @@ function init(wsServer, gamePath) {
         }
 
         maybeStartProgrammingTimer() {
-            if (this.room.phase !== "programming")
+            if (this.room.phase !== "programming" || this.room.paused)
                 return false;
             const players = this.room.playerSlots.filter((userId) => userId && this.players[userId]
                 && !this.getRobot(userId)?.eliminated && !this.getRobot(userId)?.withdrawn);
@@ -2258,6 +2339,7 @@ function init(wsServer, gamePath) {
                 ? this.room.activePowerDownMode : this.room.gameOptions.powerDownMode;
             this.room.onlinePlayers = new JSONSet();
             this.room.spectators = new JSONSet(snapshot.room.spectators || []);
+            this.room.raceExcludedPlayers = new JSONSet(snapshot.room.raceExcludedPlayers || []);
             this.players = snapshot.players || {};
             this.deck = snapshot.deck || [];
             this.discard = snapshot.discard || [];
@@ -2418,6 +2500,10 @@ function init(wsServer, gamePath) {
                     start: value.start, rotation, players: "2–8", min: 2, max: 8, length: "своя", level: "авторская", flags});
                 return;
             }
+            if (event === "join-game" && this.room.paused && this.room.phase !== "lobby"
+                && this.room.phase !== "finished") return this.joinPausedGame(userId);
+            if (event === "spectators-join" && this.room.paused && this.room.phase !== "lobby"
+                && this.room.phase !== "finished") return this.leavePausedGame(userId);
             if (event === "join-game" && this.room.phase === "lobby") {
                 if (this.room.playerSlots.includes(userId)) return;
                 const requestedSlot = this.room.playerSlots.indexOf(null);
@@ -2469,6 +2555,7 @@ function init(wsServer, gamePath) {
                 this.powerDownChoiceUsers = [];
                 this.powerDownChoices = new Map();
                 this.room.phase = "lobby";
+                this.room.raceExcludedPlayers.clear();
                 this.room.robots = [];
                 this.room.winnerId = null;
                 this.room.winnerReason = null;

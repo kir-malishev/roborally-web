@@ -414,11 +414,16 @@ function HostLivesEditor({userId, lives, app}) {
 function PlayerPanel({state, app}) {
     const robotsByUser = {};
     state.robots.forEach((robot) => robotsByUser[robot.userId] = robot);
+    const players = state.playerSlots.filter(Boolean);
+    const spectators = (state.onlinePlayers || []).filter((userId) => !players.includes(userId));
+    const isPlayer = players.includes(state.userId);
+    const canChangeRole = state.paused && state.phase !== "finished";
+    const removedFromGame = (state.raceExcludedPlayers || []).includes(state.userId);
     const displayedStats = state.historyReview && !state.historyReview.actual
         && state.historyReview.playerStats ? state.historyReview.playerStats : state.playerStats;
     return <section className="players-panel rr-panel">
         <h2>Роботы</h2>
-        {state.playerSlots.filter(Boolean).map((userId) => {
+        {players.map((userId) => {
             const robot = robotsByUser[userId] || {};
             const stats = (displayedStats && displayedStats[userId]) || {};
             const status = stats.finished ? "finished"
@@ -447,6 +452,21 @@ function PlayerPanel({state, app}) {
                     : stats.poweredDown ? <small>POWER DOWN</small> : stats.powerDownNextRound ? <small>POWER DOWN · следующий раунд</small> : null}
             </div>;
         })}
+        <div className="rr-game-spectators" aria-label="Зрители">
+            <h3>Зрители <small>{spectators.length}</small></h3>
+            {spectators.length ? <div className="rr-game-spectator-list">{spectators.map((userId) =>
+                <span className="rr-game-spectator" key={userId}>
+                    <PlayerName data={state} id={userId}/>{userId === state.hostId ? <small> · хост</small> : null}
+                    <MemberHostControls state={state} userId={userId}/>
+                </span>)}</div> : <p>Нет зрителей</p>}
+        </div>
+        {canChangeRole ? <div className="rr-game-role-actions">
+            <button type="button" disabled={isPlayer || players.length >= 8 || removedFromGame}
+                title={removedFromGame ? "Хост исключил вас из текущего заезда" : undefined}
+                onClick={() => app.socket.emit("join-game")}>{removedFromGame ? "Исключён из заезда" : "Войти в игру"}</button>
+            <button type="button" disabled={!isPlayer}
+                onClick={() => app.socket.emit("spectators-join")}>Стать зрителем</button>
+        </div> : null}
     </section>;
 }
 

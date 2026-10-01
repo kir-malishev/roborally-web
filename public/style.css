@@ -766,3 +766,263 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
     .rr-game-options > summary { align-items: flex-start; flex-direction: column; }
     .rr-option-row { align-items: flex-start; }
 }
+
+/* The 12×16 game field stays in its original coordinates; only its complete visual layer rotates. */
+.rr-view-frame { --rr-view-canvas-width: 100%; aspect-ratio: 3 / 4; overflow: hidden; }
+.rr-view-frame.rr-view-landscape { --rr-view-canvas-width: 75%; aspect-ratio: 4 / 3; }
+.rr-view-frame > .rr-view-canvas { position: absolute; left: 50%; top: 50%; width: var(--rr-view-canvas-width); aspect-ratio: 3 / 4;
+    transform: translate(-50%,-50%) rotate(var(--rr-view-angle)); transform-origin: center; }
+.rr-view-canvas .flag, .rr-view-canvas .large-preview-flag, .rr-view-canvas .preview-flag,
+.course-thumbnail .rr-view-canvas > i { transform: translate(-50%,-50%) rotate(calc(0deg - var(--rr-view-angle))); }
+.rr-view-canvas .rr-custom-pusher > span { transform: rotate(calc(0deg - var(--rr-view-angle))); }
+.rr-view-landscape .rr-custom-pusher { gap: 2px; }
+.board-viewport.rr-view-landscape { aspect-ratio: 4 / 3; }
+.board-wrap.rr-view-frame { height: auto; }
+.board-wrap > .board.rr-view-canvas { overflow: hidden; }
+.rr-view-canvas { container-type: inline-size; }
+.field-tooltip { position: fixed; z-index: 90; max-width: min(260px,calc(100vw - 20px)); font-size: 12px; }
+.rr-view-controls { display: inline-flex; align-items: center; justify-content: center; flex-wrap: nowrap; gap: 3px; min-width: 0;
+    padding: 2px; border: 1px solid #536d7a; border-radius: 7px; background: #182a34; white-space: nowrap; }
+.rr-view-controls > span { min-width: 34px; color: #d9e8eb; text-align: center; font-size: .7rem; font-weight: 800; }
+.rr-view-controls > button { min-width: 27px; height: 27px; padding: 1px 5px; font-size: .82rem; }
+.rr-view-controls > button:last-child { font-size: .67rem; }
+.rr-view-controls > button.selected { border-color: #79dec8; color: #e8fff8; background: #246b5d; }
+.rr-playing .board-toolbar { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+.rr-board-zoom-controls { display: inline-flex; align-items: center; gap: 3px; }
+.rr-playing .board-toolbar .rr-board-zoom-controls > button { min-width: 29px; width: 29px; height: 29px; padding: 0; }
+.rr-playing .board-toolbar > .board-hints-toggle { flex: none; margin-left: 0; }
+@media (max-width: 1050px) and (min-width: 761px) {
+    .rr-playing .board-toolbar > .board-hints-toggle { order: 1; }
+    .rr-playing .board-toolbar > .rr-view-controls { order: 2; }
+}
+.rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .board-toolbar > .board-hints-toggle { order: 1; }
+.rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .board-toolbar > .rr-view-controls { order: 2; }
+.rr-playing .board-toolbar .rr-view-controls { width: max-content; max-width: 100%; }
+@media (max-width: 380px) {
+    .rr-playing .rr-hud-footer { flex-wrap: wrap; justify-content: center; }
+    .rr-playing .rr-hud-footer .board-toolbar { flex: 1 1 100%; width: 100%; }
+    .rr-playing .rr-hud-footer .stage { flex: 1 1 100%; }
+}
+.selected-course-heading { flex-wrap: wrap; }
+.selected-course-heading > .rr-view-controls { display: inline-flex; gap: 3px; }
+.selected-course-heading > .rr-view-controls > span { color: #d9e8eb; font-size: .7rem; }
+.large-course-preview.rr-view-landscape { width: min(100%,420px); }
+.course-card { grid-template-columns: 80px minmax(0,1fr); min-height: 100px; }
+.course-card .course-thumbnail { width: 80px; }
+.course-thumbnail.rr-view-landscape { aspect-ratio: 4 / 3; }
+.constructor-fields > .rr-view-controls { grid-column: 1 / -1; justify-self: start; }
+.constructor-preview.rr-view-landscape { width: min(100%,560px); }
+.constructor-preview > .rr-view-canvas, .large-course-preview > .rr-view-canvas { container-type: inline-size; }
+.rr-editor-topbar > .rr-view-controls { height: 32px; }
+.rr-editor-board.rr-view-landscape { width: min(100%,880px,calc(100dvh - 180px)); }
+@media (min-width: 1000px) {
+    .constructor[open] { grid-template-columns: minmax(300px,560px) minmax(260px,1fr); }
+}
+
+/* Two independent, non-overlapping docks. Side rails reserve room for the board;
+   top and bottom docks reserve their measured height. */
+.rr-playing { --rr-left-rail: 0px; --rr-right-rail: 0px; }
+.rr-playing .game-side-hud { transition: none; }
+.rr-playing[data-info-dock="left"], .rr-playing[data-program-dock="left"]:has(.bottom-dock) { --rr-left-rail: 312px; }
+.rr-playing[data-info-dock="right"], .rr-playing[data-program-dock="right"]:has(.bottom-dock) { --rr-right-rail: 312px; }
+.rr-playing > header { padding-left: var(--rr-left-rail); padding-right: var(--rr-right-rail); }
+.rr-playing .board-column { margin-left: var(--rr-left-rail); margin-right: var(--rr-right-rail); }
+.rr-playing .game-screen { --rr-top-panel-space: 0px; padding-top: var(--rr-top-panel-space); padding-bottom: 24px; }
+.rr-playing .game-screen:has(.bottom-dock) { padding-bottom: 24px; }
+.rr-playing[data-info-dock="top"] .game-screen { --rr-top-panel-space: var(--rr-info-reserved-space,240px); }
+.rr-playing[data-program-dock="top"] .game-screen:has(.bottom-dock) { --rr-top-panel-space: var(--rr-program-reserved-space,240px); }
+.rr-playing[data-info-dock="bottom"] .game-screen { padding-bottom: var(--rr-info-reserved-space,240px); }
+.rr-playing[data-program-dock="bottom"] .game-screen:has(.bottom-dock) { padding-bottom: var(--rr-program-reserved-space,240px); }
+.rr-playing .pause-banner, .rr-playing .programming-timer {
+    left: calc((100vw + var(--rr-left-rail) - var(--rr-right-rail)) / 2);
+    top: calc(76px + var(--rr-top-panel-space));
+    max-width: calc(100vw - var(--rr-left-rail) - var(--rr-right-rail) - 28px);
+}
+.rr-playing .is-paused .programming-timer { top: calc(140px + var(--rr-top-panel-space)); }
+.rr-playing[data-info-dock="left"] .game-side-hud { left: 12px; right: auto; }
+.rr-playing[data-info-dock="right"] .game-side-hud { left: auto; right: 12px; }
+.rr-playing[data-info-dock="top"] .game-side-hud,
+.rr-playing[data-info-dock="bottom"] .game-side-hud {
+    left: calc((100vw + var(--rr-left-rail) - var(--rr-right-rail)) / 2); right: auto;
+    width: min(720px,calc(100vw - var(--rr-left-rail) - var(--rr-right-rail) - 24px));
+    max-height: min(34dvh,300px); transform: translateX(-50%);
+}
+.rr-playing[data-info-dock="top"] .game-side-hud { top: 92px; bottom: auto; }
+.rr-playing[data-info-dock="bottom"] .game-side-hud { top: auto; bottom: 12px; }
+.rr-playing .bottom-dock {
+    left: calc((100vw + var(--rr-left-rail) - var(--rr-right-rail)) / 2); right: auto;
+    width: min(1120px,calc(100vw - var(--rr-left-rail) - var(--rr-right-rail) - 24px));
+}
+.rr-playing[data-program-dock="top"] .bottom-dock { top: 92px; bottom: auto; max-height: min(38dvh,390px); }
+.rr-playing[data-program-dock="left"] .bottom-dock,
+.rr-playing[data-program-dock="right"] .bottom-dock {
+    top: 92px; bottom: 12px; width: 300px; max-height: none; transform: none;
+}
+.rr-playing[data-program-dock="left"] .bottom-dock { left: 12px; right: auto; }
+.rr-playing[data-program-dock="right"] .bottom-dock { left: auto; right: 12px; }
+.rr-playing[data-program-dock="left"] .bottom-dock.collapsed,
+.rr-playing[data-program-dock="right"] .bottom-dock.collapsed { bottom: auto; width: max-content; }
+.rr-playing[data-program-dock="bottom"] .bottom-dock.collapsed,
+.rr-playing[data-program-dock="top"] .bottom-dock.collapsed {
+    left: calc((100vw + var(--rr-left-rail) - var(--rr-right-rail)) / 2); width: max-content;
+}
+.rr-playing .bottom-dock.collapsed { flex-direction: row; align-items: center; gap: 5px; }
+.rr-playing .bottom-dock.rr-dock-programming:not(.collapsed) .bottom-dock-toggle { max-width: calc(100% - 52px); }
+.rr-dock-placement { position: relative; z-index: 3; display: grid; place-items: center; flex: 0 0 29px;
+    width: 29px; min-width: 29px; height: 28px; min-height: 28px; max-height: 28px; padding: 0;
+    border: 1px solid #5c7482; border-radius: 6px; color: #c9dce5; background: #253946;
+    pointer-events: auto; font-size: 1rem; line-height: 1; }
+.rr-dock-placement:hover { border-color: #78d8c0; color: #fff; background: #31645c; }
+.rr-program-dock-actions { position: relative; z-index: 3; display: flex; align-items: center; justify-content: flex-end;
+    gap: 4px; flex: none; height: 35px; padding: 3px 7px; }
+.rr-playing .rr-program-dock-actions > .bottom-dock-toggle {
+    position: static; display: grid; place-items: center; align-self: auto; flex: 0 0 29px;
+    width: 29px; min-width: 29px; height: 28px; min-height: 28px; max-height: 28px;
+    margin: 0; padding: 0; transform: none; border-radius: 6px; font-size: .9rem; line-height: 1; }
+.rr-playing .bottom-dock .rr-program-dock-actions > .bottom-dock-toggle {
+    border: 1px solid #5c7482; color: #c9dce5; background: #253946;
+    box-shadow: none; letter-spacing: normal; animation: none; }
+.rr-playing .bottom-dock .rr-program-dock-actions > .bottom-dock-toggle:hover {
+    border-color: #78d8c0; color: #fff; background: #31645c; }
+.rr-playing .bottom-dock.rr-dock-programming:not(.collapsed) .rr-program-dock-actions > .bottom-dock-toggle {
+    position: static; align-self: auto; max-width: 29px; margin: 0; transform: none; border-radius: 6px; }
+.rr-program-dock-actions .rr-dock-status-text { position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.rr-program-dock-actions .rr-dock-chevron { font-size: 1rem; opacity: 1; }
+.rr-playing .bottom-dock.collapsed { flex-direction: column; gap: 0; }
+.rr-playing .bottom-dock.collapsed .rr-program-dock-actions { height: 35px; padding: 3px 5px; }
+.rr-playing .board-viewport, .rr-playing .board-wrap { transition: none; }
+.rr-playing .dock-title { justify-content: flex-start; gap: 4px; }
+.rr-playing .dock-title > strong { flex: 1; }
+.rr-playing .game-side-hud .dock-title > .rr-dock-collapse-button,
+.rr-playing .bottom-dock .rr-program-dock-actions > .rr-dock-collapse-button {
+    display: grid; place-items: center; flex: 0 0 29px;
+    width: 29px; min-width: 29px; max-width: 29px; height: 28px; min-height: 28px; max-height: 28px;
+    margin: 0; padding: 0; border: 1px solid #5c7482; border-radius: 6px;
+    color: #c9dce5; background: #253946; box-shadow: none;
+    font-size: 1rem; font-weight: 400; letter-spacing: normal; line-height: 1; animation: none;
+}
+.rr-playing .game-side-hud .dock-title > .rr-dock-collapse-button:hover:not(:disabled),
+.rr-playing .bottom-dock .rr-program-dock-actions > .rr-dock-collapse-button:hover:not(:disabled) {
+    border-color: #78d8c0; color: #fff; background: #31645c;
+}
+@media (max-width: 1050px) and (min-width: 761px) {
+    .rr-playing[data-info-dock="left"], .rr-playing[data-program-dock="left"]:has(.bottom-dock) { --rr-left-rail: 294px; }
+    .rr-playing[data-info-dock="right"], .rr-playing[data-program-dock="right"]:has(.bottom-dock) { --rr-right-rail: 294px; }
+    .rr-playing[data-program-dock="left"] .bottom-dock, .rr-playing[data-program-dock="right"] .bottom-dock { width: 282px; }
+    .rr-playing[data-info-dock="left"] .game-side-hud { width: 282px; }
+}
+.rr-playing.rr-docks-compact { --rr-left-rail: 0px; --rr-right-rail: 0px; }
+.rr-playing.rr-docks-compact > header { padding-inline: 0; }
+.rr-playing.rr-docks-compact .game-layout { display: flex; flex-direction: column; gap: 12px; }
+.rr-playing.rr-docks-compact .board-column { order: 0; margin-inline: 0; }
+.rr-playing.rr-docks-compact .rr-hud-footer { flex-wrap: wrap; }
+.rr-playing.rr-docks-compact .rr-hud-footer .board-toolbar { flex: 1 1 100%; width: 100%; }
+.rr-playing.rr-docks-compact .game-side-hud,
+.rr-playing.rr-docks-compact[data-info-dock] .game-side-hud {
+    position: relative; inset: auto; width: 100%; max-height: 40dvh; transform: none;
+}
+.rr-playing.rr-docks-compact[data-info-dock="top"] .game-side-hud { order: -1; }
+.rr-playing.rr-docks-compact[data-info-dock="bottom"] .game-side-hud { order: 1; }
+.rr-playing.rr-docks-compact .game-side-hud.collapsed { width: 100%; }
+.rr-playing.rr-docks-compact[data-info-dock="top"] .game-screen { --rr-top-panel-space: 0px; }
+.rr-playing.rr-docks-compact[data-info-dock="bottom"] .game-screen { padding-bottom: 24px; }
+.rr-playing.rr-docks-compact .bottom-dock {
+    left: 50%; right: auto; width: calc(100vw - 14px); max-height: min(430px,calc(100dvh - 125px)); transform: translateX(-50%);
+}
+.rr-playing.rr-docks-compact[data-program-dock="top"] .bottom-dock { top: 66px; bottom: auto; }
+.rr-playing.rr-docks-compact[data-program-dock="bottom"] .bottom-dock { top: auto; bottom: 8px; }
+.rr-playing.rr-docks-compact .bottom-dock.collapsed { left: 50%; width: max-content; }
+.rr-playing.rr-docks-compact .pause-banner, .rr-playing.rr-docks-compact .programming-timer {
+    left: 50%; top: calc(66px + var(--rr-top-panel-space)); max-width: calc(100vw - 18px);
+}
+.rr-playing.rr-docks-compact .is-paused .programming-timer { top: calc(132px + var(--rr-top-panel-space)); }
+.rr-playing.rr-docks-compact[data-info-dock="top"] .pause-banner,
+.rr-playing.rr-docks-compact[data-info-dock="top"] .programming-timer {
+    top: calc(66px + var(--rr-info-reserved-space,0px));
+}
+.rr-playing.rr-docks-compact[data-info-dock="top"] .is-paused .programming-timer {
+    top: calc(132px + var(--rr-info-reserved-space,0px));
+}
+
+/* In a horizontal slot the information dock uses its width instead of retaining
+   the narrow sidebar's long vertical stack. */
+.rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .game-side-hud:not(.collapsed) {
+    display: grid; grid-template-columns: minmax(0,1fr) 252px; grid-template-rows: auto minmax(0,1fr);
+    width: min(1120px,calc(100vw - var(--rr-left-rail) - var(--rr-right-rail) - 24px));
+    max-height: min(44dvh,390px);
+}
+.rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .dock-title { grid-column: 1 / -1; }
+.rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .dock-scroll {
+    grid-column: 1; grid-row: 2; display: grid; grid-template-columns: minmax(255px,1.15fr) minmax(190px,.85fr);
+    grid-auto-rows: min-content; align-content: start; gap: 0; min-height: 0; overflow-y: auto;
+}
+.rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .dock-scroll > .players-panel {
+    grid-column: 1; grid-row: 1 / span 6; align-self: start;
+}
+.rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .dock-scroll > :not(.players-panel) { grid-column: 2; }
+.rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .rr-hud-footer {
+    grid-column: 2; grid-row: 2; display: flex; flex-direction: column; justify-content: space-between;
+    min-height: 0; overflow-y: auto; border-top: 0; border-left: 1px solid #465d6e; border-radius: 0 0 10px 0;
+}
+.rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .rr-hud-footer .stage {
+    flex: none; margin-top: 4px;
+}
+@media (max-width: 1200px) {
+    .rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .game-side-hud:not(.collapsed) {
+        display: flex; flex-direction: column; max-height: min(46dvh,430px);
+    }
+    .rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .dock-scroll {
+        grid-template-columns: repeat(2,minmax(0,1fr));
+    }
+    .rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .rr-hud-footer {
+        flex-direction: row; align-items: center; gap: 8px; overflow: visible; border-left: 0; border-top: 1px solid #465d6e;
+    }
+    .rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .rr-hud-footer .stage {
+        flex: 1; min-width: 80px; height: 55px; margin: 0;
+    }
+}
+@media (max-width: 900px) {
+    .rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .dock-scroll {
+        grid-template-columns: minmax(0,1fr);
+    }
+    .rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .dock-scroll > .players-panel,
+    .rr-playing:is([data-info-dock="top"],[data-info-dock="bottom"]):not(.rr-docks-compact) .dock-scroll > :not(.players-panel) {
+        grid-column: 1; grid-row: auto;
+    }
+}
+
+.rr-dock-drag-handle { cursor: grab; user-select: none; touch-action: none; }
+.rr-dock-drag-handle:active { cursor: grabbing; }
+.rr-dock-being-dragged { opacity: .93; box-shadow: 0 16px 45px #000d; }
+.rr-dock-drop-overlay { position: fixed; z-index: 120; inset: 0; background: rgba(2,9,11,.13); pointer-events: none; }
+.rr-dock-snap-preview { position: absolute; display: grid; place-items: center; border: 2px dashed #a8e8d5;
+    border-radius: 11px; color: #eefff9; background: rgba(29,106,98,.32); box-shadow: inset 0 0 32px #85e7c933;
+    font-size: .8rem; font-weight: 800; pointer-events: none; }
+.rr-dock-snap-left, .rr-dock-snap-right { top: 92px; bottom: 20px; width: 300px; }
+.rr-dock-snap-left { left: 12px; }
+.rr-dock-snap-right { right: 12px; }
+.rr-dock-snap-top, .rr-dock-snap-bottom { left: 50%; width: min(1120px,calc(100vw - 24px)); height: min(35dvh,300px); transform: translateX(-50%); }
+.rr-dock-snap-top { top: 92px; }
+.rr-dock-snap-bottom { bottom: 12px; }
+.rr-dock-snap-info.rr-dock-snap-top, .rr-dock-snap-info.rr-dock-snap-bottom { height: min(42dvh,390px); }
+@media (max-width: 760px) {
+    .rr-dock-snap-left, .rr-dock-snap-right { width: min(31vw,190px); }
+    .rr-dock-snap-top { top: 66px; }
+}
+
+/* Wide programming docks use the space beneath the introduction for registers. */
+@container rr-dock (min-width: 820px) {
+    .rr-playing .bottom-dock .program:has(.registers) {
+        display: grid;
+        grid-template-columns: minmax(0,1fr) auto;
+        grid-template-areas: "intro actions" "registers actions" "cards cards";
+        column-gap: 12px;
+        row-gap: 4px;
+    }
+    .rr-playing .bottom-dock .program-heading { display: contents; }
+    .rr-playing .bottom-dock .program-heading > div:first-child { grid-area: intro; align-self: end; }
+    .rr-playing .bottom-dock .program-actions { grid-area: actions; align-self: center; flex-wrap: nowrap; }
+    .rr-playing .bottom-dock .registers { grid-area: registers; margin: 0; }
+    .rr-playing .bottom-dock .cards { grid-area: cards; }
+}

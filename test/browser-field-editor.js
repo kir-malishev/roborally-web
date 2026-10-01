@@ -44,6 +44,34 @@ let browser;
     await dialog.getByRole("button", {name: "Обычный", exact: true}).click();
     await dialog.getByRole("button", {name: "Флаг", exact: true}).click();
     const board = dialog.locator(".rr-editor-board");
+    const viewControls = dialog.getByRole("group", {name: "Повернуть вид поля"});
+    assert(await board.evaluate((element) => element.classList.contains("rr-view-landscape")),
+        "wide editor did not default to a horizontal view");
+    const displayPoint = (box, x, y, angle) => {
+        const u = x / 12, v = y / 16;
+        const [screenX, screenY] = angle === 90 ? [1-v,u] : angle === 180 ? [1-u,1-v]
+            : angle === 270 ? [v,1-u] : [u,v];
+        return {x: 3 + screenX * (box.width - 6), y: 3 + screenY * (box.height - 6)};
+    };
+    for (const angle of [90,180,270,0]) {
+        const orientedBox = await board.boundingBox();
+        assert(Math.abs(orientedBox.width / orientedBox.height - (angle % 180 ? 4/3 : 3/4)) < .03,
+            `editor frame has the wrong proportions at ${angle}°`);
+        const position = displayPoint(orientedBox, 2.5, 2.5, angle);
+        await board.click({position});
+        assert.equal(await dialog.locator(".rr-editor-flag").count(), 1, `click missed the field at ${angle}°`);
+        const flagAngle = await dialog.locator(".rr-editor-flag").evaluate((element) => {
+            const matrix = new DOMMatrix(getComputedStyle(element).transform);
+            return Math.atan2(matrix.b, matrix.a) * 180 / Math.PI;
+        });
+        assert(Math.abs(flagAngle + angle) < .5 || Math.abs(flagAngle + angle - 360) < .5,
+            `flag number is not upright at ${angle}°`);
+        await board.click({position});
+        assert.equal(await dialog.locator(".rr-editor-flag").count(), 0, `second click missed the field at ${angle}°`);
+        if (angle !== 0) await viewControls.getByRole("button", {name: "Повернуть вид по часовой стрелке"}).click();
+    }
+    assert.equal(await page.evaluate(() => localStorage.getItem("roborally-board-view-angle")), "0",
+        "manual field view was not stored locally");
     const box = await board.boundingBox();
     const footerBox = await dialog.locator(".rr-editor-footer").boundingBox();
     assert(box.y + box.height <= footerBox.y + 1, "editor board is clipped by its footer");
@@ -167,7 +195,7 @@ let browser;
     assert.equal(await dialog.locator(".rr-custom-wall-base").count(), wallsBeforeNearMiss,
         "eraser removed a wall from the middle of a cell");
     const wallsBeforeStartErase = await dialog.locator(".rr-custom-wall-base").count();
-    await board.click({position: {x: box.width * 2.5 / 12, y: box.height * 12.08 / 16}});
+    await board.click({position: {x: box.width * 2.5 / 12, y: box.height * 12.02 / 16}});
     assert.equal(await dialog.locator(".rr-custom-wall-base").count(), wallsBeforeStartErase - 1,
         "eraser could not remove a wall on the editable part of the starting card");
     const wallsBeforeFixedEdge = await dialog.locator(".rr-custom-wall-base").count();
@@ -235,6 +263,25 @@ let browser;
     assert.equal(pusherLabel.direction, "column-reverse",
         "upright register numbers do not run along the pusher wall");
     assert(pusherLabel.layer > pusherLabel.wallLayer, "wall lines obscure pusher register numbers");
+    await viewControls.getByRole("button", {name: "Повернуть вид по часовой стрелке"}).click();
+    const pusherNumberAngle = await dialog.locator(".rr-custom-pusher-west > span").first().evaluate((element) => {
+        const matrix = new DOMMatrix(getComputedStyle(element).transform);
+        return Math.atan2(matrix.b, matrix.a) * 180 / Math.PI;
+    });
+    assert(Math.abs(pusherNumberAngle + 90) < .5, "pusher register numbers are sideways in the rotated editor");
+    const registerBoxes = await dialog.locator(".rr-custom-pusher-west > span").evaluateAll((elements) =>
+        elements.map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom};
+        }));
+    for (let first = 0; first < registerBoxes.length; first++)
+        for (let second = first + 1; second < registerBoxes.length; second++)
+            assert(registerBoxes[first].right + 1 <= registerBoxes[second].left
+                || registerBoxes[second].right + 1 <= registerBoxes[first].left
+                || registerBoxes[first].bottom + 1 <= registerBoxes[second].top
+                || registerBoxes[second].bottom + 1 <= registerBoxes[first].top,
+            "pusher register digits crowd each other in the horizontal view");
+    await viewControls.getByRole("button", {name: "Повернуть вид против часовой стрелки"}).click();
     await board.click({position: {x: box.width * 2.1 / 12, y: box.height * 8.5 / 16}});
     assert.equal(await dialog.locator(".rr-custom-pusher").count(), 1,
         "pushers with overlapping registers were placed on one cell");
@@ -273,6 +320,20 @@ let browser;
                 || pusherBoxes[first].bottom <= pusherBoxes[second].top
                 || pusherBoxes[second].bottom <= pusherBoxes[first].top,
             "neighboring pusher labels overlap");
+    await viewControls.getByRole("button", {name: "Повернуть вид по часовой стрелке"}).click();
+    const horizontalPusherBoxes = await dialog.locator(".rr-custom-pusher").evaluateAll((elements) =>
+        elements.map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom};
+        }));
+    for (let first = 0; first < horizontalPusherBoxes.length; first++)
+        for (let second = first + 1; second < horizontalPusherBoxes.length; second++)
+            assert(horizontalPusherBoxes[first].right <= horizontalPusherBoxes[second].left
+                || horizontalPusherBoxes[second].right <= horizontalPusherBoxes[first].left
+                || horizontalPusherBoxes[first].bottom <= horizontalPusherBoxes[second].top
+                || horizontalPusherBoxes[second].bottom <= horizontalPusherBoxes[first].top,
+            "neighboring pusher labels overlap in the horizontal view");
+    await viewControls.getByRole("button", {name: "Повернуть вид против часовой стрелки"}).click();
     await page.setViewportSize({width: 390, height: 760});
     const narrowPusherBoxes = await dialog.locator(".rr-custom-pusher").evaluateAll((elements) =>
         elements.map((element) => {

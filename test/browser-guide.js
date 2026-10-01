@@ -134,7 +134,7 @@ async function openPlayer(id, name, room) {
     await guest.keyboard.press("Escape");
     await guest.setViewportSize({width: 1280, height: 900});
 
-    await host.getByRole("button", {name: "Авто"}).click();
+    await host.getByRole("button", {name: "Авто", exact: true}).click();
     await host.getByRole("button", {name: "Готов", exact: true}).click();
     await guest.locator(".bottom-dock.rr-dock-timer").waitFor();
     const readDockSeconds = async () => Number((await guest.locator(".rr-dock-status-text").innerText()).match(/\d+/)[0]);

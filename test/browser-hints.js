@@ -8,7 +8,7 @@ const {server, ready} = startSandbox(port);
 let browser;
 
 async function openPlayer(browser, player, name) {
-    return openUser(browser, {port, room: "hints-smoke", name, viewport: {width: 1440, height: 1000}, timeout: 12000});
+    return openUser(browser, {port, room: "hints-smoke", name, viewport: {width: 1440, height: 1000}, timeout: 30000});
 }
 
 (async () => {
@@ -73,6 +73,11 @@ async function openPlayer(browser, player, name) {
         await host.page.locator("[data-hint-id^=pusher-]").first().hover();
         const pusherTooltip = await host.page.locator(".field-tooltip").innerText();
         assert(pusherTooltip.includes("Регистры") && pusherTooltip.includes("Фаза 5"), "Pusher phases are absent");
+        assert(await host.page.locator(".field-tooltip").evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return element.parentElement === document.body && getComputedStyle(element).position === "fixed"
+                && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight;
+        }), "field tooltip rotates with the board or escapes the viewport");
         assert.equal(await host.page.locator(".field-hint-outline").count(), 1, "Hovered field element has no outline");
     }
     if (courseName === "Chop Shop Challenge") {

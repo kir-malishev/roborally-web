@@ -330,7 +330,16 @@ async function openUser(id, name) {
     if (process.env.GAME_SCREENSHOT)
         await host.page.screenshot({path: process.env.GAME_SCREENSHOT, fullPage: false});
     assert.equal(await viewer.page.locator(".program").count(), 0, "Spectator received a programming panel");
+    assert.equal(await viewer.page.evaluate(() => {
+        const root = document.querySelector(".roborally-app");
+        root.dataset.programDock = "left";
+        const reserved = getComputedStyle(root).getPropertyValue("--rr-left-rail").trim();
+        root.dataset.programDock = "bottom";
+        return reserved;
+    }), "0px", "a spectator reserves a side rail for a programming panel they cannot see");
     assert.equal(await viewer.page.locator(".players-panel").count(), 1, "Spectator cannot follow players");
+    await host.page.waitForFunction(() => document.querySelector(".bottom-dock .rr-dock-status-text")
+        ?.textContent?.trim() === "ПРОГРАММИРОВАНИЕ · РАУНД 1");
     assert.equal(await host.page.locator(".bottom-dock .rr-dock-status-text").innerText(), "ПРОГРАММИРОВАНИЕ · РАУНД 1",
         "new programming round is not announced in the player's dock");
     assert(await host.page.locator(".bottom-dock").evaluate((element) => element.classList.contains("rr-dock-programming")),
@@ -373,6 +382,12 @@ async function openUser(id, name) {
         "Programming panel reserves too much empty page space");
     assert((await host.page.locator(".bottom-dock").evaluate((element) => getComputedStyle(element).backgroundColor)).includes("0.78"), "Programming panel is not translucent");
     await host.page.setViewportSize({width: 390, height: 760});
+    await host.page.waitForFunction(() => {
+        const dock = document.querySelector(".bottom-dock")?.getBoundingClientRect();
+        const toggle = document.querySelector(".bottom-dock-toggle")?.getBoundingClientRect();
+        return dock && toggle && dock.right <= innerWidth + 1 && toggle.left >= dock.left - 1
+            && toggle.right <= dock.right + 1 && toggle.top >= dock.top - 1 && toggle.bottom <= dock.bottom + 1;
+    });
     const narrowDockLayout = await host.page.locator(".bottom-dock").evaluate((dock) => {
         const rect = (element) => {
             const box = element.getBoundingClientRect();
@@ -412,7 +427,8 @@ async function openUser(id, name) {
     await host.page.locator(".bottom-dock-toggle").click();
     await host.page.setViewportSize({width: 1440, height: 1000});
     assert.equal(await host.page.locator(".game-side-hud .board-toolbar").count(), 1, "Map controls are not below the information panels");
-    assert(await host.page.locator(".rr-board-toolbar-main > button").last().getAttribute("class").then((value) => value.includes("board-hints-toggle")), "Hint control is not the last map button");
+    assert.equal(await host.page.locator(".board-toolbar > .board-hints-toggle").count(), 1,
+        "Hint control is not beside the rotation and size controls");
     await host.page.getByRole("button", {name: "Авто", exact: true}).click();
     await guest.page.getByRole("button", {name: "Авто", exact: true}).click();
     await host.page.getByRole("button", {name: "Готов", exact: true}).click();

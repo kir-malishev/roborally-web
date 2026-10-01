@@ -1161,13 +1161,35 @@ function BoardViewControls({app}) {
     return <div className="rr-view-controls" role="group" aria-label="Повернуть вид поля">
         <button type="button" aria-label="Повернуть вид против часовой стрелки" title="Повернуть вид против часовой стрелки"
             onClick={() => app.rotateBoardView(-90)}>↺</button>
-        <span>Вид {angle}°</span>
+        <span>{angle}°</span>
         <button type="button" aria-label="Повернуть вид по часовой стрелке" title="Повернуть вид по часовой стрелке"
             onClick={() => app.rotateBoardView(90)}>↻</button>
         <button type="button" className={automatic ? "selected" : ""} aria-label="Автоматический ракурс поля"
             aria-pressed={automatic} title="Авто: на широком экране старт слева, на узком снизу"
             onClick={() => app.resetBoardViewAngle()}>Авто</button>
     </div>;
+}
+
+const DOCK_EDGES = {left: "Слева", right: "Справа", top: "Сверху", bottom: "Снизу"};
+
+function dockEdgeAt(clientX, clientY) {
+    const horizontal = Math.min(clientX, window.innerWidth - clientX) / window.innerWidth;
+    const vertical = Math.min(clientY, window.innerHeight - clientY) / window.innerHeight;
+    const edge = horizontal < vertical ? (clientX < window.innerWidth / 2 ? "left" : "right")
+        : clientY < window.innerHeight / 2 ? "top" : "bottom";
+    return window.innerWidth <= 760 && edge === "left" ? "top"
+        : window.innerWidth <= 760 && edge === "right" ? "bottom" : edge;
+}
+
+function DockPlacementControl({app, panel, effectivePosition}) {
+    const name = panel === "info" ? "информационную панель" : "панель программирования";
+    return <button type="button" className="rr-dock-placement rr-dock-drag-handle"
+        aria-label={`Перетащить ${name}`}
+        title={`Перетащить ${name} · сейчас ${DOCK_EDGES[effectivePosition].toLowerCase()}`}
+        onPointerDown={(event) => app.beginDockPointerDrag(panel, event)}
+        onPointerMove={(event) => app.moveDockPointerDrag(event)}
+        onPointerUp={(event) => app.endDockPointerDrag(event)}
+        onPointerCancel={(event) => app.endDockPointerDrag(event, true)}>⠿</button>;
 }
 
 function CourseFieldContents({course, state, flagClassName, showLobbyRobots = false}) {
@@ -2149,14 +2171,15 @@ function Program({state, privateState, app}) {
     const drop = (event, register) => {
         event.preventDefault();
         event.stopPropagation();
+        if (interactionLocked || lockedRegisters.includes(register)) return;
         try {
             const payload = JSON.parse(event.dataTransfer.getData("application/json"));
             if (payload.kind === "register") app.socket.emit("swap-registers", {from: payload.register, to: register});
             if (payload.kind === "card") app.socket.emit("assign-register", {cardId: payload.cardId, register});
         } catch (error) {}
     };
-    const dropOnRegisters = (event) => {
-        event.preventDefault();
+    const nearestRegister = (event) => {
+        if (event.target.closest(".cards")) return null;
         const registers = [...event.currentTarget.querySelectorAll(".register")];
         const nearest = registers.map((element, register) => {
             const rect = element.getBoundingClientRect();
@@ -2164,9 +2187,17 @@ function Program({state, privateState, app}) {
             const y = Math.max(rect.top, Math.min(event.clientY, rect.bottom));
             return {register, distance: Math.hypot(event.clientX - x, event.clientY - y)};
         }).sort((left, right) => left.distance - right.distance)[0];
-        if (nearest) drop(event, nearest.register);
+        return nearest && nearest.distance <= 24 && !lockedRegisters.includes(nearest.register)
+            ? nearest.register : null;
     };
-    return <section className="program rr-panel">
+    const allowDropNearRegister = (event) => {
+        if (!interactionLocked && nearestRegister(event) !== null) event.preventDefault();
+    };
+    const dropNearRegister = (event) => {
+        const register = nearestRegister(event);
+        if (register !== null) drop(event, register);
+    };
+    return <section className="program rr-panel" onDragOver={allowDropNearRegister} onDrop={dropNearRegister}>
         <div className="program-heading">
             <div><h2>Программирование · раунд {state.round}</h2><p>Выберите ровно 5 карт. Их порядок — порядок регистров.</p></div>
             <div className="program-actions">
@@ -2188,8 +2219,7 @@ function Program({state, privateState, app}) {
                     title={mayUnlock ? "Отменить готовность и изменить выбор" : undefined}>{privateState.locked ? (mayUnlock ? "Отменить готовность" : "Готов ✓") : "Готов"}</button>
             </div>
         </div>
-        <div className="registers" onDragOver={(event) => !interactionLocked && event.preventDefault()}
-            onDrop={dropOnRegisters}>
+        <div className="registers">
             {[0, 1, 2, 3, 4].map((index) => {
                 const card = registerCards[index] || privateState.hand.find((item) => item.id === selected[index]);
                 return <div className={`register ${lockedRegisters.includes(index) ? "locked" : ""} ${autoFilledRegisters.includes(index) ? "auto-filled" : ""}`} key={index}
@@ -2315,15 +2345,18 @@ class ReentryPanel extends React.Component {
 class Game extends React.Component {
     constructor() {
         super();
-        const storedScale = Number(localStorage.getItem("roborally-board-scale"));
-        const boardScale = Number.isInteger(storedScale) && storedScale >= 30 && storedScale <= 200 && storedScale % 10 === 0
-            ? storedScale : 50;
         const storedView = localStorage.getItem(BOARD_VIEW_STORAGE_KEY);
         const boardViewChoice = ["0","90","180","270"].includes(storedView) ? Number(storedView) : null;
+        const savedInfoDock = localStorage.getItem("roborally-info-dock");
+        const savedProgramDock = localStorage.getItem("roborally-program-dock");
+        const infoDock = DOCK_EDGES[savedInfoDock] ? savedInfoDock : "right";
+        const programDock = DOCK_EDGES[savedProgramDock] && savedProgramDock !== infoDock ? savedProgramDock
+            : infoDock === "bottom" ? "right" : "bottom";
         const boardHintsEnabled = localStorage.getItem("roborally-board-hints") !== "false";
         this.state = {inited: false, phase: "loading", playerNames: {}, playerSlots: [], robots: [], log: [], flags: [],
-            boardScale, boardPanX: 0, boardPanY: 0, boardPanMode: false, boardHintsEnabled,
-            boardViewChoice, boardViewWindowWidth: window.innerWidth,
+            boardViewportWidth: null, boardZoomSteps: 0, boardHintsEnabled,
+            boardViewChoice, boardViewWindowWidth: window.innerWidth, infoDock, programDock,
+            draggedDock: null, dockDropEdge: null,
             hudCollapsed: window.innerWidth <= 760, bottomDockCollapsed: false, guideOpen: false, conveyorGuideOpen: false, gameSettingsOpen: false,
             programmingCueActive: false, timerCueActive: false};
         this.privateState = {hand: [], selected: [], locked: false};
@@ -2334,6 +2367,8 @@ class Game extends React.Component {
         this.openGameSettings = this.openGameSettings.bind(this);
         this.closeGameSettings = this.closeGameSettings.bind(this);
         this.setBottomDockRef = this.setBottomDockRef.bind(this);
+        this.setInfoDockRef = this.setInfoDockRef.bind(this);
+        this.setBoardColumnRef = this.setBoardColumnRef.bind(this);
         this.updateBoardViewWidth = this.updateBoardViewWidth.bind(this);
     }
 
@@ -2365,20 +2400,124 @@ class Game extends React.Component {
     }
 
     setBottomDockRef(element) {
-        if (this.bottomDockObserver) this.bottomDockObserver.disconnect();
-        this.bottomDockObserver = null;
-        if (!element) return;
-        const updateReservedSpace = () => element.parentElement?.style.setProperty(
-            "--rr-dock-reserved-space", `${Math.ceil(element.getBoundingClientRect().height) + 16}px`);
-        updateReservedSpace();
-        this.bottomDockObserver = new ResizeObserver(updateReservedSpace);
-        this.bottomDockObserver.observe(element);
+        this.observeDock("program", element);
     }
 
-    setBoardScale(boardScale) {
-        const normalized = Math.max(30, Math.min(200, Math.round(boardScale / 10) * 10));
-        localStorage.setItem("roborally-board-scale", String(normalized));
-        this.setState({boardScale: normalized, boardPanX: 0, boardPanY: 0});
+    setInfoDockRef(element) {
+        this.observeDock("info", element);
+    }
+
+    setBoardColumnRef(element) {
+        if (this.boardColumnObserver) this.boardColumnObserver.disconnect();
+        this.boardColumnElement = element;
+        if (element) {
+            this.boardColumnObserver = new ResizeObserver(() => this.scheduleBoardFit());
+            this.boardColumnObserver.observe(element);
+            this.scheduleBoardFit();
+        }
+    }
+
+    scheduleBoardFit() {
+        if (this.boardFitFrame) return;
+        this.boardFitFrame = requestAnimationFrame(() => {
+            this.boardFitFrame = null;
+            const column = this.boardColumnElement;
+            if (!column || !column.isConnected) return;
+            const box = column.getBoundingClientRect();
+            const root = column.closest(".roborally-app");
+            const screen = column.closest(".game-screen");
+            const reservedBelow = parseFloat(getComputedStyle(screen).paddingBottom)
+                + parseFloat(getComputedStyle(root).paddingBottom) + 3;
+            let bottom = window.innerHeight - reservedBelow;
+            for (const [selector, panel] of [[".game-side-hud", "info"], [".bottom-dock", "program"]]) {
+                if (root?.dataset[`${panel}Dock`] !== "bottom") continue;
+                const dock = root.querySelector(selector);
+                if (dock && getComputedStyle(dock).position === "fixed")
+                    bottom = Math.min(bottom, dock.getBoundingClientRect().top - 12);
+            }
+            const aspect = this.boardViewAngle() % 180 ? 4 / 3 : 3 / 4;
+            const availableWidth = Math.max(0, box.width);
+            const availableHeight = Math.max(0, bottom - box.top - window.scrollY);
+            const width = Math.round(Math.min(availableWidth, Math.max(Math.min(220, availableWidth), availableHeight * aspect)));
+            if (Math.abs((this.state.boardViewportWidth || 0) - width) > 1)
+                this.setState({boardViewportWidth: width});
+        });
+    }
+
+    observeDock(panel, element) {
+        const observerKey = `${panel}DockObserver`;
+        if (this[observerKey]) this[observerKey].disconnect();
+        this[observerKey] = null;
+        if (!element) return;
+        const updateReservedSpace = () => {
+            element.closest(".game-screen")?.style.setProperty(
+                `--rr-${panel}-reserved-space`, `${Math.ceil(element.getBoundingClientRect().height) + 16}px`);
+            this.scheduleBoardFit();
+        };
+        updateReservedSpace();
+        this[observerKey] = new ResizeObserver(updateReservedSpace);
+        this[observerKey].observe(element);
+    }
+
+    setDockPosition(panel, position) {
+        if (!DOCK_EDGES[position]) return;
+        const selectedKey = `${panel}Dock`;
+        const otherKey = panel === "info" ? "programDock" : "infoDock";
+        const previous = this.state[selectedKey];
+        const next = {[selectedKey]: position};
+        if (this.state[otherKey] === position) next[otherKey] = previous;
+        localStorage.setItem("roborally-info-dock", next.infoDock || this.state.infoDock);
+        localStorage.setItem("roborally-program-dock", next.programDock || this.state.programDock);
+        this.setState(next);
+    }
+
+    beginDockPointerDrag(panel, event) {
+        if (event.button !== 0) return;
+        const element = event.currentTarget.closest(panel === "info" ? ".game-side-hud" : ".bottom-dock");
+        const box = element.getBoundingClientRect();
+        this.dockPointerDrag = {panel, element, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+            offsetX: event.clientX - box.left, offsetY: event.clientY - box.top, width: box.width, height: box.height,
+            originalStyle: element.getAttribute("style"), started: false};
+        event.currentTarget.setPointerCapture(event.pointerId);
+    }
+
+    moveDockPointerDrag(event) {
+        const drag = this.dockPointerDrag;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        if (!drag.started && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+        if (!drag.started) {
+            drag.started = true;
+            Object.assign(drag.element.style, {position: "fixed", right: "auto", bottom: "auto", width: `${drag.width}px`,
+                height: `${drag.height}px`, maxHeight: "none", transform: "none", zIndex: "130"});
+            this.setState({draggedDock: drag.panel, dockDropEdge: dockEdgeAt(event.clientX, event.clientY)});
+        }
+        drag.element.style.left = `${event.clientX - drag.offsetX}px`;
+        drag.element.style.top = `${event.clientY - drag.offsetY}px`;
+        const edge = dockEdgeAt(event.clientX, event.clientY);
+        if (this.state.dockDropEdge !== edge) this.setState({dockDropEdge: edge});
+    }
+
+    endDockPointerDrag(event, cancelled = false) {
+        const drag = this.dockPointerDrag;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        this.dockPointerDrag = null;
+        if (!drag.started) return;
+        if (drag.originalStyle === null) drag.element.removeAttribute("style");
+        else drag.element.setAttribute("style", drag.originalStyle);
+        if (!cancelled) this.setDockPosition(drag.panel, dockEdgeAt(event.clientX, event.clientY));
+        this.setState({draggedDock: null, dockDropEdge: null});
+        this.scheduleBoardFit();
+    }
+
+    effectiveDockPositions(showProgramDock = true) {
+        const {infoDock, programDock, boardViewWindowWidth} = this.state;
+        const bothSide = showProgramDock && ["left", "right"].includes(infoDock) && ["left", "right"].includes(programDock);
+        const compact = boardViewWindowWidth <= 760 || (bothSide && boardViewWindowWidth < 1200);
+        if (!compact) return {info: infoDock, program: programDock, compact};
+        const info = infoDock === "bottom" ? "bottom" : "top";
+        let program = programDock === "top" ? "top" : "bottom";
+        if (info === program) program = info === "top" ? "bottom" : "top";
+        return {info, program, compact};
     }
 
     boardViewAngle() {
@@ -2389,65 +2528,22 @@ class Game extends React.Component {
     rotateBoardView(delta) {
         const angle = (this.boardViewAngle() + delta + 360) % 360;
         localStorage.setItem(BOARD_VIEW_STORAGE_KEY, String(angle));
-        this.setState({boardViewChoice: angle, boardPanX: 0, boardPanY: 0});
+        this.setState({boardViewChoice: angle});
     }
 
     resetBoardViewAngle() {
         localStorage.removeItem(BOARD_VIEW_STORAGE_KEY);
-        this.setState({boardViewChoice: null, boardPanX: 0, boardPanY: 0});
+        this.setState({boardViewChoice: null});
     }
 
     updateBoardViewWidth() {
         if (this.state.boardViewWindowWidth !== window.innerWidth)
-            this.setState({boardViewWindowWidth: window.innerWidth, boardPanX: 0, boardPanY: 0});
+            this.setState({boardViewWindowWidth: window.innerWidth});
+        this.scheduleBoardFit();
     }
 
-    resetBoardPosition() {
-        this.boardPanDrag = null;
-        this.setState({boardPanX: 0, boardPanY: 0, boardPanning: false});
-    }
-
-    resetBoardView() {
-        localStorage.setItem("roborally-board-scale", "50");
-        localStorage.removeItem(BOARD_VIEW_STORAGE_KEY);
-        this.setState({boardScale: 50, boardPanX: 0, boardPanY: 0, boardPanMode: false, boardViewChoice: null});
-    }
-
-    beginBoardPan(event) {
-        if (!this.state.boardPanMode || event.button !== 0) return;
-        event.preventDefault();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        this.boardPanDrag = {pointerId: event.pointerId, x: event.clientX, y: event.clientY,
-            panX: this.state.boardPanX, panY: this.state.boardPanY};
-        this.setState({boardPanning: true});
-    }
-
-    moveBoardPan(event) {
-        const drag = this.boardPanDrag;
-        if (!drag || drag.pointerId !== event.pointerId) return;
-        event.preventDefault();
-        const viewport = event.currentTarget;
-        const canvas = viewport.querySelector(".board-wrap");
-        const width = viewport.clientWidth;
-        const height = viewport.clientHeight;
-        const canvasWidth = canvas.offsetWidth;
-        const canvasHeight = canvas.offsetHeight;
-        // Deliberately allow empty space around the board at every zoom level,
-        // but keep a visible edge so the board cannot be lost completely.
-        const clamp = (value, size, canvasSize) => {
-            const visibleEdge = Math.min(80, Math.max(24, Math.min(width, height) * .15));
-            return Math.max(visibleEdge - canvasSize, Math.min(size - visibleEdge, value));
-        };
-        this.setState({
-            boardPanX: clamp(drag.panX + event.clientX - drag.x, width, canvasWidth),
-            boardPanY: clamp(drag.panY + event.clientY - drag.y, height, canvasHeight)
-        });
-    }
-
-    endBoardPan(event) {
-        if (!this.boardPanDrag || this.boardPanDrag.pointerId !== event.pointerId) return;
-        this.boardPanDrag = null;
-        this.setState({boardPanning: false});
+    componentDidUpdate() {
+        this.scheduleBoardFit();
     }
 
     componentDidMount() {
@@ -2494,6 +2590,11 @@ class Game extends React.Component {
                     : "Программирование · RoboRally";
             } else document.title = "RoboRally";
             if (state.phase !== "lobby" && !state.paused) localState.gameSettingsOpen = false;
+            if (state.phase === "lobby") {
+                this.dockPointerDrag = null;
+                localState.draggedDock = null;
+                localState.dockDropEdge = null;
+            }
             this.setState({...state, ...localState, userId: this.userId, inited: true});
         });
         this.socket.on("player-state", (playerState) => {
@@ -2510,6 +2611,9 @@ class Game extends React.Component {
         clearTimeout(this.programmingCueTimeout);
         clearTimeout(this.timerCueTimeout);
         if (this.bottomDockObserver) this.bottomDockObserver.disconnect();
+        if (this.infoDockObserver) this.infoDockObserver.disconnect();
+        if (this.boardColumnObserver) this.boardColumnObserver.disconnect();
+        if (this.boardFitFrame) cancelAnimationFrame(this.boardFitFrame);
         document.title = "RoboRally";
     }
 
@@ -2525,28 +2629,34 @@ class Game extends React.Component {
         const reviewingHistory = state.paused && !historyReview.actual;
         const replayKey = reviewingHistory ? `history-${historyReview.revision}` : "live";
         const viewAngle = this.boardViewAngle();
-        const viewScale = state.boardScale * (viewAngle % 180 ? 4 / 3 : 1);
+        const boardWidth = state.boardViewportWidth && Math.round(state.boardViewportWidth * Math.pow(1.15, state.boardZoomSteps));
+        const dockPositions = this.effectiveDockPositions(showBottomDock);
         return <React.Fragment>
         <CommonRoom state={state} app={this}/>
         <HostControls app={this} data={state} timerControls={[]}
             emitEvent={(...args) => this.socket.emit(...args)}/>
-        <main className={`roborally-app ${state.phase !== "lobby" ? "rr-playing" : ""}`}>
+        <main className={`roborally-app ${state.phase !== "lobby" ? "rr-playing" : ""} ${dockPositions.compact ? "rr-docks-compact" : ""}`}
+            data-info-dock={dockPositions.info} data-program-dock={dockPositions.program}>
             <header>
                 <div><h1>RoboRally</h1><p>Комната {state.roomId} · {state.phase === "programming" ? "программирование" : state.phase === "resolving" ? "исполнение" : state.phase === "power-down-choice" ? "решение Power Down" : state.phase === "reentry" ? "возрождение" : state.phase === "finished" ? "финиш" : "лобби"}</p></div>
                 {state.userId === state.hostId && state.phase !== "lobby" ? <button onClick={() => this.socket.emit("restart-game")}>В лобби</button> : null}
             </header>
             {state.phase === "lobby" ? <Lobby state={state} app={this} onOpenGuide={this.openGuide} onOpenSettings={this.openGameSettings}/> : <div className={`game-screen ${state.paused ? "is-paused" : ""} ${reviewingHistory ? "is-history-review" : ""} ${historyReview.playing ? "is-history-playing" : ""}`}>
+                {state.draggedDock ? <div className="rr-dock-drop-overlay" aria-hidden="true">
+                    <div className={`rr-dock-snap-preview rr-dock-snap-${state.dockDropEdge} rr-dock-snap-${state.draggedDock}`}>
+                        {DOCK_EDGES[state.dockDropEdge]}
+                    </div>
+                </div> : null}
                 <PauseBanner state={state}/>
                 {!isPlayer ? <ProgrammingTimer state={state}/> : null}
                 <section className="game-layout">
-                    <div className="board-column">
-                        <div className={`board-viewport ${viewAngle % 180 ? "rr-view-landscape" : ""} ${state.boardPanMode ? "pan-enabled" : ""} ${state.boardPanning ? "panning" : ""}`}
-                            style={{width: `${Math.min(viewScale, 100)}%`}}
-                            onPointerDown={(event) => this.beginBoardPan(event)} onPointerMove={(event) => this.moveBoardPan(event)}
-                            onPointerUp={(event) => this.endBoardPan(event)} onPointerCancel={(event) => this.endBoardPan(event)}>
+                    <div className="board-column" ref={this.setBoardColumnRef}>
+                        <div className={`board-viewport ${viewAngle % 180 ? "rr-view-landscape" : ""}`}
+                            style={{width: boardWidth ? `${boardWidth}px` : "100%",
+                                marginLeft: boardWidth ? `calc(50% - ${boardWidth / 2}px)` : undefined,
+                                marginRight: 0}}>
                         <div className={`board-wrap ${boardViewClass(viewAngle)}`} style={{...boardViewStyle(viewAngle),
-                            width: `${Math.max(viewScale, 100)}%`,
-                            transform: `translate(${state.boardPanX}px, ${state.boardPanY}px)`}}>
+                            width: "100%"}}>
                             <div className="board rr-view-canvas" aria-label={`Игровое поле ${state.board.name}`}>
                             {state.course.customFeatures ? <div className={`factory-card ${state.course.customFeatures.fullField ? "rr-full-field" : ""}`}>
                                 <CustomFactoryArt features={state.course.customFeatures}
@@ -2575,9 +2685,15 @@ class Game extends React.Component {
                         </div>
                         </div>
                     </div>
-                    <aside className={`game-side-hud ${state.hudCollapsed ? "collapsed" : ""}`}>
-                        <div className="dock-title"><strong>{state.hudCollapsed ? "Роботы и поле" : `Раунд ${state.round}`}</strong><button type="button" aria-expanded={!state.hudCollapsed} title={state.hudCollapsed ? "Показать панели" : "Свернуть панели"}
-                            onClick={() => this.setState({hudCollapsed: !state.hudCollapsed})}>{state.hudCollapsed ? "◀" : "▶"}</button></div>
+                    <aside ref={this.setInfoDockRef} className={`game-side-hud ${state.hudCollapsed ? "collapsed" : ""} ${state.draggedDock === "info" ? "rr-dock-being-dragged" : ""}`}>
+                        <div className="dock-title"><strong>
+                            {state.hudCollapsed ? "Роботы и поле" : `Раунд ${state.round}`}</strong>
+                            <button type="button" className="rr-dock-collapse-button" aria-expanded={!state.hudCollapsed}
+                                aria-label={state.hudCollapsed ? "Показать информационную панель" : "Свернуть информационную панель"}
+                                title={state.hudCollapsed ? "Показать панель" : "Свернуть панель"}
+                                onClick={() => this.setState({hudCollapsed: !state.hudCollapsed})}>
+                                {state.hudCollapsed ? "▴" : "▾"}</button>
+                            <DockPlacementControl app={this} panel="info" effectivePosition={dockPositions.info}/></div>
                         <div className="dock-scroll">
                         <PlayerPanel state={state} app={this}/>
                         {state.course.specialRules ? <details className="rr-game-disclosure rr-course-rules"><summary>Особые правила · {state.course.name}</summary>
@@ -2592,19 +2708,18 @@ class Game extends React.Component {
                         </div>
                         <div className="rr-hud-footer">
                         <div className="board-toolbar rr-panel" aria-label="Управление видом поля">
-                            <div className="rr-board-toolbar-main">
-                            <button type="button" title="Уменьшить поле" aria-label="Уменьшить поле"
-                                disabled={state.boardScale <= 30} onClick={() => this.setBoardScale(state.boardScale - 10)}>−</button>
-                            <span>{state.boardScale}%</span>
-                            <button type="button" title="Увеличить поле" aria-label="Увеличить поле"
-                                disabled={state.boardScale >= 200} onClick={() => this.setBoardScale(state.boardScale + 10)}>+</button>
-                            <button type="button" className={`board-pan-toggle ${state.boardPanMode ? "active" : ""}`}
-                                title="Переключить режим перемещения поля" aria-label="Перемещать поле"
-                                aria-pressed={state.boardPanMode} onClick={() => this.setState({boardPanMode: !state.boardPanMode})}>✥</button>
-                            <button type="button" className="board-position-reset" title="Вернуть поле в исходную позицию, сохранив масштаб"
-                                aria-label="Сбросить позицию поля" onClick={() => this.resetBoardPosition()}>⌂</button>
-                            <button type="button" className="board-reset" title="Сбросить масштаб и позицию"
-                                aria-label="Сбросить вид поля" onClick={() => this.resetBoardView()}>↺</button>
+                            <div className="rr-board-zoom-controls" role="group" aria-label="Размер поля">
+                                <button type="button" aria-label="Уменьшить поле" title="Уменьшить поле"
+                                    disabled={state.boardZoomSteps <= -6}
+                                    onClick={() => this.setState({boardZoomSteps: Math.max(-6, state.boardZoomSteps - 1)})}>−</button>
+                                <button type="button" aria-label="Автоматический размер поля" title="Автоматический размер поля"
+                                    disabled={state.boardZoomSteps === 0}
+                                    onClick={() => this.setState({boardZoomSteps: 0})}>⤢</button>
+                                <button type="button" aria-label="Увеличить поле" title="Увеличить поле"
+                                    disabled={state.boardZoomSteps >= 8}
+                                    onClick={() => this.setState({boardZoomSteps: Math.min(8, state.boardZoomSteps + 1)})}>+</button>
+                            </div>
+                            <BoardViewControls app={this}/>
                             <button type="button" className={`board-hints-toggle ${state.boardHintsEnabled ? "active" : ""}`}
                                 title="Включить или отключить подсказки элементов поля" aria-label="Подсказки элементов поля"
                                 aria-pressed={state.boardHintsEnabled} onClick={() => {
@@ -2612,22 +2727,24 @@ class Game extends React.Component {
                                     localStorage.setItem("roborally-board-hints", String(enabled));
                                     this.setState({boardHintsEnabled: enabled});
                                 }}>?</button>
-                            </div>
-                            <BoardViewControls app={this}/>
                         </div>
                         <section className="rr-panel stage" role="status"><h2>{state.phase === "resolving" ? `Регистр ${state.register} / 5` : "Сейчас"}</h2>
                             <p>{reviewingHistory ? `Журнал: ${state.stage}` : state.paused ? "Игра на паузе" : state.phase === "resolving" ? state.stage : state.phase === "programming" ? "Выбор программы" : state.phase === "reentry" ? "Возрождение роботов" : state.phase === "power-down-choice" ? "Решение Power Down" : "Заезд завершён"}</p></section>
                         </div>
                     </aside>
                 </section>
-                {showBottomDock ? <section ref={this.setBottomDockRef} className={`bottom-dock ${state.bottomDockCollapsed ? "collapsed" : ""} ${dockProgramming.className}${dockCueClasses}`}>
-                    <button className="bottom-dock-toggle" type="button" onClick={() => this.setState({bottomDockCollapsed: !state.bottomDockCollapsed})}
-                        title={state.bottomDockCollapsed ? "Показать игровую панель" : "Свернуть игровую панель"}>
+                {showBottomDock ? <section ref={this.setBottomDockRef} className={`bottom-dock ${state.bottomDockCollapsed ? "collapsed" : ""} ${state.draggedDock === "program" ? "rr-dock-being-dragged" : ""} ${dockProgramming.className}${dockCueClasses}`}>
+                    <div className="rr-program-dock-actions"><button className="bottom-dock-toggle rr-dock-collapse-button" type="button"
+                        onClick={() => this.setState({bottomDockCollapsed: !state.bottomDockCollapsed})}
+                        aria-label={state.bottomDockCollapsed ? "Показать панель программирования" : "Свернуть панель программирования"}
+                        aria-expanded={!state.bottomDockCollapsed}
+                        title={state.bottomDockCollapsed ? "Показать панель" : "Свернуть панель"}>
                         <span className="rr-dock-status-text" role="status" aria-live="polite">
                             {dockProgramming.label || (state.bottomDockCollapsed ? "Показать игровую панель" : "Свернуть")}
                         </span>
-                        <span className="rr-dock-chevron" aria-hidden="true">{state.bottomDockCollapsed ? "▲" : "▼"}</span>
+                        <span className="rr-dock-chevron" aria-hidden="true">{state.bottomDockCollapsed ? "▴" : "▾"}</span>
                     </button>
+                    <DockPlacementControl app={this} panel="program" effectivePosition={dockPositions.program}/></div>
                     <div className="bottom-dock-scroll">
                         <Program state={state} privateState={this.privateState} app={this}/>
                         <PowerDownChoicePanel state={state} privateState={this.privateState} app={this}/>

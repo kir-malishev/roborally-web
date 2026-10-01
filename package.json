@@ -23,12 +23,13 @@
     "test:special-rules": "node test/special-rules.js",
     "test:victory": "node test/victory.js",
     "test:pause": "node test/pause.js",
-    "test:browser": "node test/browser-hints.js && node test/browser-lasers.js && node test/browser-lobby.js && node test/browser-field-editor.js && node test/browser-power-down.js && node test/browser-board-events.js && node test/browser-programming-timer.js && node test/browser-pause.js && node test/browser-history-review.js && node test/browser-guide.js && node test/browser-layout.js",
+    "test:browser": "node test/browser-hints.js && node test/browser-lasers.js && node test/browser-lobby.js && node test/browser-field-editor.js && node test/browser-power-down.js && node test/browser-board-events.js && node test/browser-programming-timer.js && node test/browser-pause.js && node test/browser-history-review.js && node test/browser-guide.js && node test/browser-layout.js && node test/browser-side-registers.js",
     "test:pause:browser": "node test/browser-pause.js",
     "test:assets": "node test/web-assets.js",
     "audit:boards": "node scripts/render-board-audit.js",
     "assets:guide": "node scripts/build-guide-assets.js",
-    "assets:editor": "node scripts/build-editor-assets.js"
+    "assets:editor": "node scripts/build-editor-assets.js",
+    "test:side-registers": "node test/browser-side-registers.js"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^1.0.8",

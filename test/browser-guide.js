@@ -124,6 +124,7 @@ async function openPlayer(id, name, room) {
     assert(await conveyorButton.evaluate((element) => element === document.activeElement), "focus did not return to the conveyor button");
 
     await guest.setViewportSize({width: 390, height: 760});
+    await guest.getByRole("button", {name: "Показать информационную панель"}).click();
     await conveyorButton.click();
     const conveyorBounds = await guest.locator(".conveyor-guide-modal").boundingBox();
     assert(conveyorBounds && conveyorBounds.x >= 0 && conveyorBounds.y >= 0

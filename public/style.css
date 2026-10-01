@@ -1036,3 +1036,34 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
     .rr-playing .bottom-dock .registers { grid-area: registers; margin: 0; }
     .rr-playing .bottom-dock .cards { grid-area: cards; }
 }
+
+/* Clear lobby status and role selection. */
+.roborally-app .rr-lobby-next-step { color: #dce8ee; line-height: 1.45; }
+.roborally-app .role-actions .current-role:disabled { background: #1b2a34; border-color: #688391; color: #dce8ee; opacity: 1; }
+.roborally-app .color-picker button { width: 36px; height: 36px; color: white; text-shadow: 0 1px 3px black, 0 0 3px black; font-weight: 800; }
+
+/* Keep the full hand and registers visible on a tablet-width game screen. */
+@media (min-width: 761px) and (max-width: 999px) {
+    .rr-playing.rr-docks-compact .registers { grid-template-columns: repeat(5,minmax(0,1fr)); }
+    .rr-playing.rr-docks-compact .cards { display: grid; grid-template-columns: repeat(9,minmax(0,1fr)); }
+    .rr-playing.rr-docks-compact .card { min-width: 0; min-height: 76px; }
+    .rr-playing.rr-docks-compact .card strong { font-size: .72rem; }
+}
+
+/* A side-mounted program dock has room for one readable register per row. */
+.rr-playing:not(.rr-docks-compact):is([data-program-dock="left"],[data-program-dock="right"]) .bottom-dock .registers,
+.rr-playing:not(.rr-docks-compact):is([data-program-dock="left"],[data-program-dock="right"]) .bottom-dock .public-program-row > div {
+    grid-template-columns: minmax(0,1fr);
+}
+.rr-playing:not(.rr-docks-compact):is([data-program-dock="left"],[data-program-dock="right"]) .bottom-dock .public-program-row {
+    grid-template-columns: minmax(0,1fr); gap: 5px; padding-block: 9px; border-top: 1px solid #ffffff1c;
+}
+.rr-playing:not(.rr-docks-compact):is([data-program-dock="left"],[data-program-dock="right"]) .bottom-dock .public-register {
+    min-height: 32px; flex-direction: row; justify-content: flex-start; gap: 8px; padding: 5px 8px; text-align: left;
+}
+.rr-playing:not(.rr-docks-compact):is([data-program-dock="left"],[data-program-dock="right"]) .bottom-dock .public-register b {
+    min-width: 0; overflow-wrap: anywhere;
+}
+.rr-playing:not(.rr-docks-compact):is([data-program-dock="left"],[data-program-dock="right"]) .bottom-dock .public-register .priority-badge {
+    flex: none; margin: 0 0 0 auto;
+}

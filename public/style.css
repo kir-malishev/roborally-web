@@ -636,13 +636,6 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
 .rr-custom-start-number { position: absolute; z-index: 0; display: grid; place-items: center; pointer-events: none; }
 .rr-custom-start-number b { box-sizing: border-box; display: grid; place-items: center; width: 82%; aspect-ratio: 1; border: max(1px,.43cqw) solid #090d0e; border-radius: 50%; color: #080c0d; background: linear-gradient(145deg,#c4c9c8,#8d9798); box-shadow: inset 0 0 0 max(1px,.12cqw) #dce0dd,0 max(1px,.09cqw) max(1px,.16cqw) #0007; font-family: 'Arial Black',Impact,Arial,sans-serif; font-size: 5cqw; font-weight: 900; line-height: 1; }
 .rr-custom-tile, .rr-custom-pit { position: absolute; z-index: 1; display: block; object-fit: fill; pointer-events: none; }
-.rr-custom-junction { z-index: 1; overflow: visible; }
-.rr-junction-rollers { fill: none; stroke: #b9b7a4; stroke-width: 80; stroke-dasharray: 3 2; }
-.rr-junction-lane { fill: none; stroke: #1e2626; stroke-width: 64; }
-.rr-junction-flow { fill: none; stroke: #d8aa50; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
-.rr-junction-head { fill: #d8aa50; stroke: #f2d18a; stroke-width: 1; stroke-linejoin: round; }
-.rr-custom-junction .express .rr-junction-flow { stroke: #8ebcda; }
-.rr-custom-junction .express .rr-junction-head { fill: #8ebcda; stroke: #c9e5f1; }
 .rr-custom-pit { background: radial-gradient(circle at 48% 42%,#050608 15%,#171415 70%,#363027 100%); box-shadow: inset 0 0 .5cqw #000; }
 .rr-custom-lines { position: absolute; z-index: 10; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .rr-custom-beam { stroke: #f45552; stroke-width: .025; filter: drop-shadow(0 0 .025px #f33); }

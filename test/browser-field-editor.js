@@ -228,14 +228,13 @@ let browser;
     assert.equal(await dialog.locator("img[src$='repair.webp']").count(), 0,
         "dragging eraser did not clear the second start-card cell");
     assert.equal(await dialog.locator(".rr-custom-junction").count(), 2, "merge or curved turn was not drawn");
-    const merge = dialog.locator(".rr-custom-junction").first();
-    const laneCount = await merge.locator(".rr-junction-lane").count();
-    assert.equal(laneCount, 4,
-        "three incoming belts and one outgoing belt were not shown together");
-    assert.equal(await merge.locator(".rr-junction-head").count(), 1,
-        "merge must have only one outgoing arrowhead");
-    assert.match(await dialog.locator(".rr-custom-junction").last().locator(".rr-junction-lane").getAttribute("d"), / C/,
-        "turning conveyor belt must have a rounded corner");
+    const junctionSprites = await dialog.locator(".rr-custom-junction").evaluateAll((elements) =>
+        elements.map((image) => ({name: image.src.split("/").at(-1), loaded: image.complete && image.naturalWidth > 0})));
+    assert(junctionSprites.every(({loaded}) => loaded), "original conveyor junction artwork failed to load");
+    assert(junctionSprites.some(({name}) => name === "belt-triple-merge.webp"),
+        "three incoming belts are missing their merged sprite");
+    assert(junctionSprites.some(({name}) => name === "belt-turn.webp"),
+        "turning conveyor is missing its curved original sprite");
     await dialog.getByRole("button", {name: "Шестерня", exact: true}).click();
     await page.mouse.move(box.x + box.width * 2.5 / 12, box.y + box.height * 2.5 / 16);
     await page.mouse.down();

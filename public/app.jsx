@@ -1036,52 +1036,18 @@ function conveyorInlets(features, key) {
 
 function conveyorArt(features, key, inbound = conveyorInlets(features, key)) {
     const outgoing = features.conveyors[key];
-    const incoming = inbound.find((direction) => direction !== outgoing) || inbound[0];
-    const difference = incoming ? (EDITOR_DIRECTIONS.indexOf(outgoing) - EDITOR_DIRECTIONS.indexOf(incoming) + 4) % 4 : 0;
     const express = (features.express || []).includes(key);
     const angle = (EDITOR_DIRECTIONS.indexOf(outgoing) - EDITOR_DIRECTIONS.indexOf("east") + 4) % 4 * 90;
-    return {sprite: `${express ? "express" : "belt"}-straight`, transform: `rotate(${angle}deg)`,
-        junction: inbound.length > 1 || difference === 2};
-}
-
-function ConveyorJunctionArt({outgoing, inbound, express, style}) {
-    const out = FIELD_VECTORS[outgoing];
-    const armDirections = [...new Set([...inbound.map((direction) => OPPOSITE_DIRECTION[direction]), outgoing])];
-    const singleTurn = inbound.length === 1 && inbound[0] !== outgoing;
-    const arms = singleTurn ? (() => {
-        const incoming = FIELD_VECTORS[inbound[0]];
-        const start = [50-incoming[0]*50,50-incoming[1]*50];
-        const end = [50+out[0]*50,50+out[1]*50];
-        const controlA = [start[0]+incoming[0]*28,start[1]+incoming[1]*28];
-        const controlB = [end[0]-out[0]*28,end[1]-out[1]*28];
-        return [`M${start.join(" ")} C${controlA.join(" ")} ${controlB.join(" ")} ${end.join(" ")}`];
-    })() : armDirections.map((direction) => {
-        const vector = FIELD_VECTORS[direction];
-        return `M50 50 L${50+vector[0]*50} ${50+vector[1]*50}`;
-    });
-    const join = [50+out[0]*12,50+out[1]*12];
-    const paths = inbound.map((direction) => {
-        const incoming = FIELD_VECTORS[direction];
-        const tail = [50-incoming[0]*37,50-incoming[1]*37];
-        if (direction === outgoing) return `M${tail.join(" ")} L${join.join(" ")}`;
-        const controlA = [tail[0]+incoming[0]*24,tail[1]+incoming[1]*24];
-        const controlB = [join[0]-out[0]*13,join[1]-out[1]*13];
-        return `M${tail.join(" ")} C${controlA.join(" ")} ${controlB.join(" ")} ${join.join(" ")}`;
-    });
-    const shaftEnd = [50+out[0]*34,50+out[1]*34];
-    const side = [-out[1],out[0]];
-    const head = [50+out[0]*42,50+out[1]*42];
-    const wingA = [50+out[0]*30+side[0]*7,50+out[1]*30+side[1]*7];
-    const wingB = [50+out[0]*30-side[0]*7,50+out[1]*30-side[1]*7];
-    return <svg className="rr-custom-tile rr-custom-junction" style={style} viewBox="0 0 100 100" preserveAspectRatio="none">
-        {arms.map((path,index) => <path key={`roller-${index}`} d={path} className="rr-junction-rollers"/>)}
-        {arms.map((path,index) => <path key={`lane-${index}`} d={path} className="rr-junction-lane"/>)}
-        <g className={express ? "express" : ""}>
-            {paths.map((path,index) => <path key={`flow-${index}`} d={path} className="rr-junction-flow"/>)}
-            <path d={`M${join.join(" ")} L${shaftEnd.join(" ")}`} className="rr-junction-flow"/>
-            <polygon points={`${head.join(",")} ${wingA.join(",")} ${wingB.join(",")}`} className="rr-junction-head"/>
-        </g>
-    </svg>;
+    const prefix = express ? "express" : "belt";
+    const sides = inbound.filter((direction) => direction !== outgoing);
+    if (!sides.length) return {sprite: `${prefix}-straight`, transform: `rotate(${angle}deg)`, junction: false};
+    const sprite = sides.length === 2 ? (inbound.length === 3 ? "triple-merge" : "double-turn")
+        : inbound.length === 2 ? "merge" : "turn";
+    const canonicalSource = express && sprite === "turn" ? "south" : "north";
+    const sideIndex = (EDITOR_DIRECTIONS.indexOf(OPPOSITE_DIRECTION[sides[0]])
+        - EDITOR_DIRECTIONS.indexOf(outgoing) + 4) % 4;
+    const mirrored = sides.length === 1 && (sideIndex === 1 ? canonicalSource === "north" : canonicalSource === "south");
+    return {sprite: `${prefix}-${sprite}`, transform: `rotate(${angle}deg)${mirrored ? " scaleY(-1)" : ""}`, junction: true};
 }
 
 function CustomFactoryArt({features, starts = []}) {
@@ -1090,9 +1056,9 @@ function CustomFactoryArt({features, starts = []}) {
     const pits = new Set(features.pits || []);
     const walls = new Set(features.walls || []);
     const physicalWalls = [...new Map([...walls].map((wall) => [physicalWallId(wall), wall])).values()];
-    const tile = (name, key, transform = "") => {
+    const tile = (name, key, transform = "", junction = false) => {
         const [x, y] = keyPoint(key);
-        return <img key={`${name}-${key}`} className="rr-custom-tile" draggable="false" alt=""
+        return <img key={`${name}-${key}`} className={`rr-custom-tile${junction ? " rr-custom-junction" : ""}`} draggable="false" alt=""
             style={{...customCellStyle(x, y, rows), transform}} src={`${EDITOR_ART}${name}.webp`}/>;
     };
     return <div className={`rr-custom-factory ${rows === 16 ? "rr-custom-full-field" : ""}`} aria-hidden="true">
@@ -1109,12 +1075,7 @@ function CustomFactoryArt({features, starts = []}) {
         })}
         {Object.entries(features.conveyors || {}).map(([key]) => {
             const inbound = conveyorInlets(features, key), art = conveyorArt(features, key, inbound);
-            if (inbound.length && (art.junction || inbound[0] !== features.conveyors[key])) {
-                const [x,y] = keyPoint(key);
-                return <ConveyorJunctionArt key={`junction-${key}`} style={customCellStyle(x,y,rows)}
-                    outgoing={features.conveyors[key]} inbound={inbound} express={(features.express || []).includes(key)}/>;
-            }
-            return tile(art.sprite, key, art.transform);
+            return tile(art.sprite, key, art.transform, art.junction);
         })}
         {(features.repairs || []).map((key) => tile("repair", key))}
         {Object.entries(features.gears || {}).map(([key, turn]) => tile(turn === 1 ? "gear-right" : "gear-left", key))}

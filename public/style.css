@@ -6,7 +6,7 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
 .roborally-app { max-width: 1540px; margin: auto; padding: 18px 18px 72px; }
 :where(.roborally-app) header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 14px; } :where(.roborally-app) h1, :where(.roborally-app) h2, :where(.roborally-app) p { margin-top: 0; } :where(.roborally-app) h1 { letter-spacing: .06em; margin-bottom: 2px; } :where(.roborally-app) header p { color: #aebfca; margin: 0; }
 :where(.roborally-app) .rr-panel { background: rgba(21, 31, 39, .92); border: 1px solid #465d6e; border-radius: 11px; box-shadow: 0 9px 28px #0005; padding: 16px; }
-.lobby-shell { max-width: 1220px; margin: 1vh auto; display: grid; grid-template-columns: minmax(300px,.85fr) minmax(480px,1.4fr); align-items: start; gap: 12px; }
+.lobby-shell { max-width: 1220px; margin: 1vh auto; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); align-items: stretch; gap: 12px; }
 .lobby-intro { display: grid; align-content: start; gap: 12px; padding: 13px !important; }.lobby-intro-title { min-height: 44px; display: flex; justify-content: space-between; align-items: start; gap: 12px; }.lobby-intro h2 { margin-bottom: 2px; font-size: 1.12rem; }.lobby-intro p { color: #9fb2bf; margin: 0; font-size: .78rem; }.lobby-intro .lobby-guide-button { flex: none; }
 .lobby-primary-actions { display: grid; grid-template-columns: minmax(0,1fr) 178px; align-items: start; gap: 10px; }.role-actions { min-width: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }.role-actions button, .lobby-start button, .lobby-start-placeholder { width: 100%; height: 44px; min-height: 44px; padding: .35rem .58rem; font-size: .79rem; line-height: 1.15; }.role-actions .current-role:disabled { opacity: .82; cursor: default; }.lobby-members { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; align-content: start; padding: 13px !important; }.member-column h3, .color-picker h3 { margin: 0 0 6px; font-size: .9rem; }.member-column h3 small { color: #9eb1bd; font-weight: 400; }.lobby-member { min-height: 31px; display: flex; align-items: center; gap: 7px; border-top: 1px solid #ffffff18; padding: 4px 2px; font-size: .82rem; }.lobby-member > .lobby-robot-color { width: 14px; height: 14px; border: 2px solid #fff9; border-radius: 50%; flex: none; }.lobby-member > span { flex: 1; overflow: hidden; text-overflow: ellipsis; }.lobby-member > span small { color: #ffd26d; }.lobby-member > b { font-size: .7rem; color: #90dca4; }.lobby-member.spectator { color: #adbdc7; }.empty-members { color: #8296a3; font-size: .78rem; margin-bottom: 0; }.color-picker { grid-column: 1 / -1; border-top: 1px solid #ffffff1c; padding-top: 8px; }.color-picker > div { display: flex; flex-wrap: wrap; gap: 6px; }.color-picker button { width: 29px; height: 29px; padding: 3px; border-radius: 50%; background: var(--swatch); border: 3px solid transparent; box-shadow: inset 0 0 0 1px #fff8; }.color-picker button:hover:not(:disabled) { background: var(--swatch); transform: scale(1.08); }.color-picker button.selected { border-color: #fff; box-shadow: 0 0 0 2px #ffc94d; }.color-picker button:disabled { filter: grayscale(.8); opacity: .22; }
 .lobby-member > em { flex: none; color: #c9d7df; font-size: .7rem; font-style: normal; }
@@ -558,7 +558,7 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
 .lobby-primary-actions, .role-actions, .lobby-start { min-width: 0; }
 .role-actions button, .lobby-start button, .lobby-start-placeholder { height: auto; min-height: 44px; overflow-wrap: break-word; }
 .role-actions button { white-space: normal; }
-@container rr-lobby-intro (max-width: 560px) {
+@container rr-lobby-intro (max-width: 420px) {
     .lobby-primary-actions { grid-template-columns: minmax(0,1fr); }
     .role-actions { grid-template-columns: repeat(2,minmax(0,1fr)); }
     .role-actions button, .lobby-start button, .lobby-start-placeholder { min-height: 52px; }
@@ -567,7 +567,7 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
     .lobby-intro-title { flex-wrap: wrap; }
     .lobby-intro .lobby-guide-button { min-width: 0; }
 }
-@media (max-width: 960px) {
+@media (max-width: 1050px) {
     .lobby-shell { grid-template-columns: minmax(0,1fr); }
     .lobby-members, .course-setup { grid-column: 1; }
 }

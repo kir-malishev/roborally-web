@@ -81,6 +81,12 @@ async function openUser(id, name) {
         const layout = await lobbyActionLayout(page);
         assertLobbyActionsFit(layout, "Wide lobby");
     }
+    const panelHeights = await host.page.locator(".lobby-shell").evaluate((shell) => ({
+        intro: shell.querySelector(".lobby-intro").getBoundingClientRect().height,
+        members: shell.querySelector(".lobby-members").getBoundingClientRect().height
+    }));
+    assert(Math.abs(panelHeights.intro - panelHeights.members) <= 1, "Wide lobby panels have different heights");
+    assert(panelHeights.intro < 210, "Wide lobby introduction is unnecessarily tall");
     const catalogueMetrics = await viewer.page.locator(".course-list").evaluate((element) => ({
         clientHeight: element.clientHeight,
         scrollHeight: element.scrollHeight,

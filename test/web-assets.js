@@ -31,7 +31,7 @@ GUIDE_ASSETS.forEach(({id}) => {
 });
 assert(guideTotal <= 250 * 1024, `Guide asset payload exceeds 250 KB: ${guideTotal}`);
 const editorDir = path.join(publicDir, "assets", "editor");
-const editorAssets = ["floor", "repair", "gear-right", "gear-left", "belt-straight", "express-straight",
+const editorAssets = ["floor", "repair", "gear-right", "gear-left", "pit-border", "belt-straight", "express-straight",
     "belt-turn", "belt-merge", "belt-double-turn", "belt-triple-merge",
     "express-turn", "express-merge", "express-double-turn", "express-triple-merge"];
 assert.deepStrictEqual(fs.readdirSync(editorDir).sort(), editorAssets.map((name) => `${name}.webp`).sort(),

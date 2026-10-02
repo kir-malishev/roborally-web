@@ -636,7 +636,7 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
 .rr-custom-start-number { position: absolute; z-index: 0; display: grid; place-items: center; pointer-events: none; }
 .rr-custom-start-number b { box-sizing: border-box; display: grid; place-items: center; width: 82%; aspect-ratio: 1; border: max(1px,.43cqw) solid #090d0e; border-radius: 50%; color: #080c0d; background: linear-gradient(145deg,#c4c9c8,#8d9798); box-shadow: inset 0 0 0 max(1px,.12cqw) #dce0dd,0 max(1px,.09cqw) max(1px,.16cqw) #0007; font-family: 'Arial Black',Impact,Arial,sans-serif; font-size: 5cqw; font-weight: 900; line-height: 1; }
 .rr-custom-tile, .rr-custom-pit { position: absolute; z-index: 1; display: block; object-fit: fill; pointer-events: none; }
-.rr-custom-pit { background: radial-gradient(circle at 48% 42%,#050608 15%,#171415 70%,#363027 100%); box-shadow: inset 0 0 .5cqw #000; }
+.rr-custom-pit { background: linear-gradient(to bottom,var(--pit-n-shade),transparent 36%),linear-gradient(to left,var(--pit-e-shade),transparent 36%),linear-gradient(to top,var(--pit-s-shade),transparent 36%),linear-gradient(to right,var(--pit-w-shade),transparent 36%),#111117; border: 0 solid transparent; border-image: url('/roborally/assets/editor/pit-border.webp') 22 / 22% stretch; }
 .rr-custom-lines { position: absolute; z-index: 10; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .rr-custom-beam { stroke: #f45552; stroke-width: .025; filter: drop-shadow(0 0 .025px #f33); }
 .rr-custom-wall-base { stroke: #171917; stroke-width: .12; }
@@ -679,6 +679,7 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at top, #
 .rr-editor-palette .rr-editor-tool-icon { width: min(100%,62px); }
 .rr-editor-tool-label { max-width: 100%; font-size: .71rem; line-height: 1.1; text-align: center; overflow-wrap: anywhere; }
 .rr-editor-tool-sprite { background-size: cover; background-position: center; image-rendering: auto; }
+.rr-editor-pit-icon { background: url('/roborally/assets/editor/pit-border.webp') center / cover; }
 .rr-editor-palette button.selected, .rr-editor-registers button.selected, .rr-editor-variants button.selected { border-color: #79dec8; color: #e8fff8; background: #246b5d; box-shadow: 0 0 0 1px #79dec8; font-weight: 800; }
 .rr-editor-palette button:hover, .rr-editor-variants button:hover { border-color: #a8e7db; }
 .rr-editor-palette button:focus-visible, .rr-editor-variants button:focus-visible { outline: 2px solid #fff1a2; outline-offset: 2px; }

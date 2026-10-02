@@ -38,6 +38,13 @@ async function build() {
         canvas.getContext("2d").drawImage(image, x * size, y * size, size, size, 0, 0, size, size);
         fs.writeFileSync(path.join(destination, `${name}.webp`), canvas.toBuffer("image/webp", 82));
     }
+    // The isolated pit supplies the original hazard stripe and recessed rim.
+    // The editor paints only exposed sides, so connected pits share one void.
+    const cross = images.get("cross.webp");
+    const pitSize = cross.width / 12;
+    const pitBorder = createCanvas(pitSize, pitSize);
+    pitBorder.getContext("2d").drawImage(cross, 9 * pitSize, 2 * pitSize, pitSize, pitSize, 0, 0, pitSize, pitSize);
+    fs.writeFileSync(path.join(destination, "pit-border.webp"), pitBorder.toBuffer("image/webp", 82));
     const maelstrom = await loadImage(path.join(source, "maelstrom.webp"));
     const size = maelstrom.width / 12;
     const cropJunction = (x, y, rotation) => {
@@ -66,7 +73,7 @@ async function build() {
         context.restore();
         fs.writeFileSync(path.join(destination, `${prefix}-triple-merge.webp`), canvas.toBuffer("image/webp", 82));
     }
-    console.log(`Created ${Object.keys(cells).length + Object.keys(junctions).length + 2} field-editor sprites.`);
+    console.log(`Created ${Object.keys(cells).length + Object.keys(junctions).length + 3} field-editor sprites.`);
 }
 
 if (require.main === module) build().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -999,6 +999,7 @@ const EDITOR_TOOLS = [["conveyor","Конвейер"],["pit","Яма"],["wall","
     ["pusher","Толкатель"],["gear","Шестерня"],["repair","Ремонт"],["flag","Флаг"],["erase","Ластик"]];
 
 function EditorToolIcon({tool, gearTurn = 1, express = false}) {
+    if (tool === "pit") return <span className="rr-editor-tool-icon rr-editor-pit-icon" aria-hidden="true"/>;
     const sprite = tool === "conveyor" ? (express ? "express-straight" : "belt-straight")
         : tool === "gear" ? (gearTurn === 1 ? "gear-right" : "gear-left")
             : tool === "repair" ? "repair" : null;
@@ -1006,7 +1007,6 @@ function EditorToolIcon({tool, gearTurn = 1, express = false}) {
         style={{backgroundImage: `url(${EDITOR_ART}${sprite}.webp)`}}/>;
     return <svg className="rr-editor-tool-icon" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
         <rect x="2" y="2" width="36" height="36" rx="3" fill="#9ca8ab" stroke="#d0d5cf" strokeWidth="2"/>
-        {tool === "pit" ? <rect x="4" y="4" width="32" height="32" rx="2" fill="#080b0e"/> : null}
         {tool === "wall" ? <React.Fragment><path d="M6 7h28" stroke="#2b2a22" strokeWidth="8"/><path d="M6 5h28" stroke="#f4ce4b" strokeWidth="3" strokeDasharray="5 3"/></React.Fragment> : null}
         {tool === "laser" ? <React.Fragment><path d="M5 7h30" stroke="#242626" strokeWidth="8"/><path d="M7 5h26" stroke="#f7c83d" strokeWidth="2" strokeDasharray="4 3"/><circle cx="20" cy="10" r="4" fill="#f35e5c"/><path d="M20 13v24" stroke="#ff3f46" strokeWidth="2.5"/><path d="M18 13v24" stroke="#ffaaaa" strokeWidth="1"/></React.Fragment> : null}
         {tool === "pusher" ? <React.Fragment><path d="M6 7h28" stroke="#252720" strokeWidth="8"/><path d="M7 5h26" stroke="#f5c74b" strokeWidth="2" strokeDasharray="4 3"/><path d="M14 13v10h-5l11 10 11-10h-5V13z" fill="#edbd48" stroke="#282421" strokeWidth="2"/></React.Fragment> : null}
@@ -1066,12 +1066,14 @@ function CustomFactoryArt({features, starts = []}) {
             className="rr-custom-start-number" style={customCellStyle(x,y,rows)}><b>{index+1}</b></span>) : null}
         {(features.pits || []).map((key) => {
             const [x,y] = keyPoint(key);
-            const border = "max(2px,.28cqw) solid #dfc334";
+            const edge = (connected) => connected ? "0" : "22%";
+            const shade = (connected) => connected ? "transparent" : "rgba(96,68,49,.72)";
+            const north = pits.has(`${x},${y-1}`), east = pits.has(`${x+1},${y}`);
+            const south = pits.has(`${x},${y+1}`), west = pits.has(`${x-1},${y}`);
             return <div key={`pit-${key}`} className="rr-custom-pit" style={{...customCellStyle(x,y,rows),
-                borderTop: pits.has(`${x},${y-1}`) ? 0 : border,
-                borderRight: pits.has(`${x+1},${y}`) ? 0 : border,
-                borderBottom: pits.has(`${x},${y+1}`) ? 0 : border,
-                borderLeft: pits.has(`${x-1},${y}`) ? 0 : border}}/>;
+                borderImageWidth: `${edge(north)} ${edge(east)} ${edge(south)} ${edge(west)}`,
+                "--pit-n-shade": shade(north), "--pit-e-shade": shade(east),
+                "--pit-s-shade": shade(south), "--pit-w-shade": shade(west)}}/>;
         })}
         {Object.entries(features.conveyors || {}).map(([key]) => {
             const inbound = conveyorInlets(features, key), art = conveyorArt(features, key, inbound);
